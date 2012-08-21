@@ -1,0 +1,37 @@
+
+(All the below mentioned commands are run from the 'kernel' directory.
+
+Building
+---
+
+Requirements:
+    Solaris Nevada >= build 77
+    Sun Studio 11
+
+
+Build the FUSE kernel modules
+$ make
+
+Note: gmake(1) will fail to build the kernel module.
+
+
+Installing
+---
+
+Populate the proto area:
+$ make install
+
+Generate the package:
+$ make pkg
+
+Add the SUNWfusefs package to the system (as root):
+# pkgadd -d packages SUNWfusefs
+
+Update the boot archive (x86/x64 only)
+# bootadm update-archive
+
+Uninstalling
+---
+
+Remove the SUNWlibfuse from the system (as root):
+# pkgrm SUNWfusefs
