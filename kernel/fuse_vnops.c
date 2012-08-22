@@ -1150,7 +1150,7 @@ wrfuse(struct vnode *vp, struct uio *uiop, int ioflag,
 
 		if (vpm_enable) {
 			err = vpm_data_copy(vp, uoff, bytes, uiop, !pagecreate,
-			    &newpage, 0, S_WRITE);
+				    &newpage, pagecreate && pageoff, S_WRITE);
 		} else {
 			segmap_offset = (uoff & PAGEMASK) & MAXBOFFSET;
 			base = segmap_getmapflt(segkmap, vp,
