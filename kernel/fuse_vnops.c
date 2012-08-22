@@ -1612,6 +1612,7 @@ fuse_link(struct vnode *dvp, struct vnode *srcvp, char *tnm,
 	struct fuse_entry_out *feo;
 	fuse_msg_node_t *msgp;
 	char *name;
+	struct vnode *vp;
 	fuse_session_t *sep;
 	int err = DDI_SUCCESS;
 	int nmlen = strlen(tnm) + 1;
@@ -1626,6 +1627,13 @@ fuse_link(struct vnode *dvp, struct vnode *srcvp, char *tnm,
 	/* Directories cannot be linked */
 	if (srcvp->v_type == VDIR)
 		return (EPERM);
+
+	/* Make sure the target does not exist */
+	err = fuse_lookup_i(dvp, tnm, &vp, credp);
+	if (!err && vp) {
+		VN_RELE(vp);
+		return (EEXIST);
+	}
 
 	msgp = fuse_setup_message(sizeof (*fli) + nmlen, FUSE_LINK,
 	    VNODE_TO_NODEID(dvp), credp, FUSE_GET_UNIQUE(sep));
@@ -2295,11 +2303,23 @@ fuse_create(struct vnode *dvp, char *nm, struct vattr *vap, vcexcl_t excl,
 {
 	struct fuse_vnode_data *fvdata;
 	uint32_t stringlen;
+	int err;
 
 	if (!nm || *nm == '\0') {
 		DTRACE_PROBE2(fuse_create_err_invalid_name,
 		    char *, "Invalid filename", char *, nm);
 		return (EEXIST);
+	}
+
+		/* Check whether the target exists */
+	err = fuse_lookup_i(dvp, nm, vpp, cred_p);
+	if (!err && *vpp) {
+		VN_RELE(*vpp);
+		/* Recreating an existing file without O_EXCL is allowed */
+		if ((vap->va_type == VREG) && !excl)
+			return (0);
+		else
+			return (EEXIST);
 	}
 
 	if (vap->va_type == VDIR) {
@@ -2316,14 +2336,6 @@ fuse_create(struct vnode *dvp, char *nm, struct vattr *vap, vcexcl_t excl,
 		    char *, "Invalid file type",
 		    struct vattr *, vap);
 		return (EINVAL);
-	}
-
-	int lku = fuse_lookup_i(dvp, nm, vpp, cred_p);
-	if (*vpp)
-		VN_RELE(*vpp);
-	if (!lku) {
-		/* Cannot create an existing file with O_EXCL */
-		return (excl ? EEXIST : 0);
 	}
 
 	/*
@@ -3211,6 +3223,13 @@ fuse_symlink(vnode_t *dvp, char *name, vattr_t *vap, char *target,
 		return (ENODEV);
 	}
 
+	/* Make sure the target does not exist */
+	err = fuse_lookup_i(dvp, name, &vp, credp);
+	if (!err && vp) {
+		VN_RELE(vp);
+		return (EEXIST);
+	}
+
 	msgp = fuse_setup_message(namelen + targlen, FUSE_SYMLINK,
 	    VNODE_TO_NODEID(dvp), credp, FUSE_GET_UNIQUE(sep));
 
@@ -3911,6 +3930,7 @@ fuse_mkdir(vnode_t *dvp, char *dirname, vattr_t *vap, vnode_t **vpp,
 	struct fuse_mkdir_in *fmkdi;
 	fuse_msg_node_t *msgp;
 	int err = 0;
+	vnode_t *vp;
 	fuse_session_t *sep;
 	int namelen;
 
@@ -3925,6 +3945,13 @@ fuse_mkdir(vnode_t *dvp, char *dirname, vattr_t *vap, vnode_t **vpp,
 	namelen = strlen(dirname) + 1;
 	if (namelen > MAXNAMELEN) {
 		return (ENAMETOOLONG);
+	}
+
+	/* Make sure the target does not exist */
+	err = fuse_lookup_i(dvp, dirname, &vp, credp);
+	if (!err && vp) {
+		VN_RELE(vp);
+		return (EEXIST);
 	}
 
 	msgp = fuse_setup_message((sizeof (*fmkdi) + namelen),
