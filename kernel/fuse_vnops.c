@@ -2894,6 +2894,14 @@ fuse_remove(vnode_t *dvp, char *name, cred_t *credp, caller_context_t *ct,
 		goto cleanup;
 	}
 
+	/* Check for any error from fuse library */
+	if ((err = msgp->opdata.fouth->error) != 0) {
+		DTRACE_PROBE2(fuse_unlink_err_unlink_req,
+			char *, "FUSE_UNLINK request failed",
+			struct fuse_out_header *, msgp->opdata.fouth);
+		goto cleanup;
+	}
+
 	/* Check if we have seen and cached the associated vnode */
 	err = fuse_getvnode(FUSE_NULL_ID, &vp, VNODE_CACHED,
 	    0, sep, dvp->v_vfsp, namelen, name, VNODE_TO_NODEID(dvp), credp);
