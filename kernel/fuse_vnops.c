@@ -2784,6 +2784,18 @@ fuse_rename(vnode_t *sdvp, char *oldname, vnode_t *tdvp, char *newname,
 	struct vnode *svp = NULL;
 	struct vnode *tvp = NULL;
 
+	/*
+	 * Check for renaming to or from '.' or '..'
+	 */
+	if ((oldname[0] == '.' &&
+	    (oldname[1] == '\0' || (oldname[1] == '.' &&
+	    oldname[2] == '\0'))) ||
+	    (newname[0] == '.' &&
+	    (newname[1] == '\0' || (newname[1] == '.' &&
+	    newname[2] == '\0')))) {
+		err = EINVAL;
+		goto errout;
+	}
 
 	/* Try obtaining the source vnode by doing a lookup */
 	err = fuse_lookup_i(sdvp, oldname, &svp, credp);
@@ -2801,16 +2813,7 @@ fuse_rename(vnode_t *sdvp, char *oldname, vnode_t *tdvp, char *newname,
 		goto errout;
 	}
 
-	/*
-	 * Check for renaming to or from '.' or '..'
-	 */
-	if ((oldname[0] == '.' &&
-	    (oldname[1] == '\0' || (oldname[1] == '.' &&
-	    oldname[2] == '\0'))) ||
-	    (newname[0] == '.' &&
-	    (newname[1] == '\0' || (newname[1] == '.' &&
-	    newname[2] == '\0'))) ||
-	    (sdvp == svp)) {
+	if (sdvp == svp) {
 		err = EINVAL;
 		goto errout;
 	}
