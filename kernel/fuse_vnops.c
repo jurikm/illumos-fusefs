@@ -629,6 +629,10 @@ get_filehandle(struct vnode *vp, int flag, struct cred *credp,
 			DTRACE_PROBE3(get_filehandle_err_create,
 			    char *, "create_filehandle request failed",
 			    int, err, struct vnode *, vp);
+			/* release the vnode, if creation failed */
+			VFS_RELE(vp->v_vfsp);
+			vp->v_data = NULL;
+			vn_free(vp);
 			goto out;
 		} else if (msgp && msgp->opdata.outdata) {
 			DTRACE_PROBE2(get_filehandle_info_create_ok,
