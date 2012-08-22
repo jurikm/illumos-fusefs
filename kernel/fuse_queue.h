@@ -51,6 +51,7 @@ typedef struct fuse_session
 	ksema_t		session_sema; /* devops read sleeps over it */
 	list_t		msg_list;  /* message awaiting service rests here */
 	avl_tree_t	avl_cache; /* nodeid used to track associated vnode */
+	kmutex_t	avl_mutx; /* serialize actions on avl_cache */
 	minor_t		minor; /* Minor number associated with this session */
 	uint32_t	state;
 	uint64_t	unique; /* msg id used between lib and kernel module */
