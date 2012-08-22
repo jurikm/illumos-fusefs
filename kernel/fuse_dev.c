@@ -85,7 +85,7 @@ static struct cb_ops fuse_dev_cb_ops = {
 	fuse_dev_prop_op,
 	NULL,	/* streamtab struct; if not NULL, all above */
 		/* fields are ignored */
-	D_NEW | D_MP,	/* compatibility flags: see conf.h */
+	D_NEW | D_MP | D_64BIT | D_U64BIT,	/* compatibility flags: see conf.h */
 	CB_REV,	/* cb_ops revision number */
 	nodev,	/* no aread */
 	nodev	/* no awrite */
