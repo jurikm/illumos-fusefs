@@ -128,7 +128,7 @@ typedef struct fuse_vnode_data {
 } fuse_vnode_data_t;
 
 /* Get nodeid from the struct vnode */
-#define	VNODE_TO_NODEID(vp)	((struct fuse_vnode_data *)vp->v_data)->nodeid
+#define	VNODE_TO_NODEID(vp)	((struct fuse_vnode_data *)(vp)->v_data)->nodeid
 /*
  * Max number of pages that can be used in a single read request
  * (used in FreeBSD Fuse)
