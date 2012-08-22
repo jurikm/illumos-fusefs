@@ -1595,6 +1595,18 @@ fuse_setattr(
 	if (mask & AT_NOSET)
 		return (EINVAL);
 
+	if (mask & AT_SIZE) {
+			/*
+			 * Mark all pages beyond the truncation as invalid
+			 * otherwise old data may show in holes which
+			 * are left in rewritten parts.
+			 * Actually we cannot find pages beyond the
+			 * truncation, so we invalidate them all.
+			 */
+		if (vn_has_cached_data(vp))
+			pvn_vplist_dirty(vp, 0, fuse_putapage, B_INVAL, credp);
+	}
+
 	mutex_enter(&VTOFD(vp)->f_lock);
 
 	if (err = VOP_GETATTR(vp, &va, flags, credp, ct))
