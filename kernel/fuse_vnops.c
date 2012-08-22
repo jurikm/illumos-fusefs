@@ -2609,11 +2609,18 @@ fuse_path_check(struct vnode *svp, struct vnode *tdvp, struct cred *credp)
 				DTRACE_PROBE2(fuse_path_check_err_parent,
 				    char *, "Parent vnode not found",
 				    struct vnode *, vp);
-				vp = NULL;
 				/*
 				 * XXX: Is this the right error no to return?
+				 * The root directory is not in cache,
+				 * if we reached it and the source is not
+				 * the root directory, there is no error.
 				 */
-				err = EINVAL;
+				if ((VTOFD(vp)->par_nid == FUSE_ROOT_ID)
+				    && (VNODE_TO_NODEID(svp) != FUSE_ROOT_ID))
+					err = 0;
+				else
+					err = EINVAL;
+				vp = NULL;
 				break;
 			} else if (err) {
 				DTRACE_PROBE3(fuse_path_check_err_getvnode,
