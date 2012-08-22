@@ -2077,8 +2077,16 @@ fuse_lookup_i(struct vnode *dvp, char *nm, struct vnode **vpp, cred_t *credp)
 
 				/*
 				 * Convert device special files
+				 * JPA do not do that for fifo's :
+				 * this changes the v_data and the nodeid
+				 * cannot be determined, leading to crashes
+				 * when the inode is needed (e.g. when
+				 * hardlinking another name.
+				 * Moreover the avl_tree should be kept
+				 * in sync with the vnodes in use.
 		 		 */
-				if (IS_DEVVP(*vpp)) {
+				if (((*vpp)->v_type != VFIFO)
+				    && IS_DEVVP(*vpp)) {
 					vnode_t	*svp;
 
 					svp = specvp(*vpp, (*vpp)->v_rdev,
