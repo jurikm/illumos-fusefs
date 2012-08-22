@@ -21,6 +21,8 @@
 /*
  * Copyright 2009 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
+ *
+ * Portions Copyright 2012 Jean-Pierre Andre
  */
 
 /*
@@ -369,6 +371,7 @@ fuse_dev_write(dev_t dev, struct uio *uiop, cred_t *cred_p)
 	struct fuse_out_header *outh;
 	fuse_session_t *se_p;
 	fuse_msg_node_t *msg_p = NULL;
+	fuse_msg_node_t *msg_next;
 	minor_t ndx = getminor(dev);
 	struct fuse_iov *iovbuf;
 
@@ -414,8 +417,7 @@ fuse_dev_write(dev_t dev, struct uio *uiop, cred_t *cred_p)
 
 	/* Reset error before starting the search */
 	err = DDI_FAILURE;
-	for (msg_p = list_head(&(se_p->msg_list)); msg_p;
-	    msg_p = list_next(&(se_p->msg_list), msg_p)) {
+	for (msg_p = list_head(&(se_p->msg_list)); msg_p; ) {
 		if (msg_p->fmn_unique == outh->unique) {
 			if (msg_p->fmn_state == FUSE_MSG_STATE_READ) {
 				msg_p->fmn_state = FUSE_MSG_STATE_WRITE;
@@ -430,6 +432,24 @@ fuse_dev_write(dev_t dev, struct uio *uiop, cred_t *cred_p)
 				FUSE_SESSION_MUTEX_UNLOCK(se_p);
 				goto cleanup;
 			}
+			msg_p = list_next(&(se_p->msg_list), msg_p);
+		} else {
+			msg_next = list_next(&(se_p->msg_list), msg_p);
+			/*
+			 * if no callback handler is registered, and no
+			 * reply is expected, it is our responsibility 
+			 * to free up obsolete message nodes.
+			 */
+			if (!msg_p->frd_on_request_complete
+			    && msg_p->fmn_noreply) {
+				if (msg_p->fmn_unique < se_p->max_unique) {
+					list_remove(&(se_p->msg_list), msg_p);
+					fuse_free_msg(msg_p);
+				}
+				if (outh->unique > se_p->max_unique)
+					se_p->max_unique = outh->unique;
+			}
+			msg_p = msg_next;
 		}
 	}
 	FUSE_SESSION_MUTEX_UNLOCK(se_p);

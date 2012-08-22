@@ -54,6 +54,7 @@ typedef struct fuse_session
 	minor_t		minor; /* Minor number associated with this session */
 	uint32_t	state;
 	uint64_t	unique; /* msg id used between lib and kernel module */
+	uint64_t	max_unique;
 	cred_t		*usercred;  /* Credentials passed by fuse library */
 	uint32_t	max_write;  /* Max Write value set by fuse lib */
 	vfs_t		*vfs;
@@ -109,6 +110,7 @@ struct fuse_msg_node
 	kcondvar_t	fmn_cv;
 	kmutex_t	fmn_mutx;
 	int		fmn_state;
+	int		fmn_noreply; /* no reply expected */
 	uint64_t	fmn_unique;  /* identifies a unique message */
 	/* Message interchange struct between FUSE Kernel and FUSE lib. */
 	fuse_req_data_t	fmn_req;

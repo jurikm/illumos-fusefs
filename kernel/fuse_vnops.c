@@ -3125,6 +3125,7 @@ fuse_send_forget(uint64_t nodeid, fuse_session_t *sep, uint64_t nlookup)
 	ffi->nlookup = nlookup;
 
 	/* Send the request to the fuse daemon and return */
+	msgp->fmn_noreply = 1;
 	fuse_queue_request_nowait(sep, msgp);
 }
 
