@@ -1361,7 +1361,8 @@ static void fuse_set_getattr(struct vnode *vp, struct vattr *vap,
 
 	vap->va_mask = AT_ALL;
 	vap->va_type = vp->v_type;
-	vap->va_nodeid = VNODE_TO_NODEID(vp);
+	/* return the file system ino, not the fuse internal nodeid */
+	vap->va_nodeid = attr->ino;
 
 	vap->va_rdev = vp->v_rdev;
 	vap->va_blksize = vp->v_vfsp->vfs_bsize;
