@@ -317,7 +317,7 @@ fuse_dev_read(dev_t dev, struct uio *uiop, cred_t *credp)
 		 * Check if there is enough room to copy all data from this
 		 * iovbuf
 		 */
-		if (uiop->uio_resid < msgp->ipdata.iovbuf[i].len) {
+		if ((size_t)uiop->uio_resid < msgp->ipdata.iovbuf[i].len) {
 			DTRACE_PROBE2(fuse_dev_read_err_no_space,
 			    char *, "Buffer too small for request data",
 			    fuse_session_t *, sep);
@@ -341,7 +341,8 @@ fuse_dev_read(dev_t dev, struct uio *uiop, cred_t *credp)
 static int
 fuse_ohead_audit(struct fuse_out_header *ohead, struct uio *uio)
 {
-	if (uio->uio_resid + sizeof (struct fuse_out_header) != ohead->len) {
+	if ((size_t)uio->uio_resid + sizeof (struct fuse_out_header)
+			!= ohead->len) {
 		DTRACE_PROBE3(fuse_ohead_audit_err_header,
 		    char *, "Invalid length in header",
 		    struct uio *, uio,
@@ -462,7 +463,7 @@ fuse_dev_write(dev_t dev, struct uio *uiop, cred_t *cred_p)
 			iovbuf = &msg_p->opdata.iovbuf;
 
 			if (iovbuf->memsize &&
-			    iovbuf->memsize < uiop->uio_resid &&
+			    iovbuf->memsize < (size_t)uiop->uio_resid &&
 			    iovbuf->memflag == MEM_TYPE_KMEM) {
 				kmem_free(iovbuf->base, iovbuf->memsize);
 				iovbuf->memsize = 0;
@@ -472,7 +473,8 @@ fuse_dev_write(dev_t dev, struct uio *uiop, cred_t *cred_p)
 				fuse_buf_alloc(iovbuf, uiop->uio_resid);
 			}
 
-			iovbuf->len = min(iovbuf->memsize, uiop->uio_resid);
+			iovbuf->len = min(iovbuf->memsize,
+						(size_t)uiop->uio_resid);
 
 			/* Save the start and length of arguments */
 			msg_p->opdata.outdata = iovbuf->base;

@@ -1026,7 +1026,7 @@ rdfuse(struct vnode *vp, struct uio *uiop, struct cred *credp)
 		/* Calculate offset within a page that must be read */
 		off = uiop->uio_loffset;
 		pageoffset = off & PAGEOFFSET;
-		len = MIN(PAGESIZE - pageoffset, uiop->uio_resid);
+		len = MIN(PAGESIZE - pageoffset, (size_t)uiop->uio_resid);
 
 		/* Check if we are crossing end of file */
 		diff = fsize - off;
@@ -1058,7 +1058,7 @@ rdfuse(struct vnode *vp, struct uio *uiop, struct cred *credp)
 			(void) segmap_release(segkmap, base, 0);
 	} while (err == 0 && uiop->uio_resid > 0);
 
-	if (uiop->uio_resid != req_len)
+	if ((ulong_t)uiop->uio_resid != req_len)
 		err = 0;
 
 	return (err);
@@ -1094,7 +1094,7 @@ wrfuse(struct vnode *vp, struct uio *uiop, int ioflag,
 	if (limit == RLIM64_INFINITY || limit > MAXOFFSET_T)
 		limit = MAXOFFSET_T;
 
-	if (uiop->uio_loffset >= limit) {
+	if ((rlim64_t)uiop->uio_loffset >= limit) {
 		proc_t *p = ttoproc(curthread);
 
 		mutex_enter(&p->p_lock);
@@ -1122,7 +1122,7 @@ wrfuse(struct vnode *vp, struct uio *uiop, int ioflag,
 	do {
 		uoff = uiop->uio_offset;
 		pageoff = uoff & (u_offset_t)PAGEOFFSET;
-		bytes = MIN(PAGESIZE - pageoff, uiop->uio_resid);
+		bytes = MIN(PAGESIZE - pageoff, (size_t)uiop->uio_resid);
 
 		if (uoff + bytes >= limit) {
 			if (uoff >= limit) {
@@ -1138,8 +1138,8 @@ wrfuse(struct vnode *vp, struct uio *uiop, int ioflag,
 		 * 2. When the file is yet to be written to or of zero size.
 		 * 3. When we are extending the file from a new page
 		 */
-		pagecreate = (bytes == PAGESIZE) | (fsize == 0) |
-		    ((pageoff == 0) && (fsize <= uiop->uio_offset));
+		pagecreate = (bytes == (ssize_t)PAGESIZE) | (fsize == 0) |
+		    ((pageoff == 0) && (fsize <= (u_offset_t)uiop->uio_offset));
 
 		if (uoff + bytes > fsize) {
 			file_size_change = 1;
@@ -1180,7 +1180,7 @@ wrfuse(struct vnode *vp, struct uio *uiop, int ioflag,
 			 * write valid data.
 			 */
 			if (pagecreate &&
-			    uiop->uio_offset < P2ROUNDUP(uoff + bytes,
+			    (size_t)uiop->uio_offset < P2ROUNDUP(uoff + bytes,
 			    PAGESIZE)) {
 				long zoffset;
 				long nmoved;
@@ -1188,7 +1188,8 @@ wrfuse(struct vnode *vp, struct uio *uiop, int ioflag,
 				nmoved = uiop->uio_offset - uoff;
 				ASSERT((nmoved + pageoff) <= PAGESIZE);
 
-				if ((zoffset = pageoff + nmoved) < PAGESIZE)
+				if ((size_t)(zoffset = pageoff + nmoved)
+							< PAGESIZE)
 					(void) kzero(
 					    base + segmap_offset + zoffset,
 					    (size_t)PAGESIZE - zoffset);
@@ -2457,7 +2458,7 @@ fuse_perform_read(struct fuse_io_data *fiodata)
 		fri = (struct fuse_read_in *)msgp->ipdata.indata;
 		fri->fh = fh->fh_id;
 		fri->offset = uiop->uio_offset;
-		fri->size = MIN(uiop->uio_resid,
+		fri->size = MIN((size_t)uiop->uio_resid,
 		    PAGESIZE * FUSE_MAX_PAGES_PER_REQ);
 
 		if ((err = fuse_queue_request_wait(sep, msgp))) {
@@ -3234,7 +3235,7 @@ fuse_space(vnode_t *vp, int cmd, struct flock64 *bfp, int flag,
 
 			va.va_mask = AT_SIZE;
 			error = VOP_GETATTR(vp, &va, 0, cr, ct);
-			if (error || va.va_size == bfp->l_start) {
+			if (error || va.va_size == (u_offset_t)bfp->l_start) {
 				/*
 				 * do not update ctime/mtime if truncate
 				 * to previous size, just exit
@@ -3401,7 +3402,7 @@ fuse_putpage(struct vnode *vp, offset_t off, size_t len, int flags,
 			return (err);
 		}
 
-		eoff = MIN(off + len, fsize);
+		eoff = MIN((u_offset_t)(off + len), fsize);
 
 		for (io_off = off; io_off < eoff; io_off += io_len) {
 			/*
