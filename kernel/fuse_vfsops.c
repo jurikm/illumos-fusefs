@@ -436,6 +436,7 @@ fuse_unmount(struct vfs *vfsp, int flag, struct cred *crp)
 	fsep = fuse_minor_get_session(getminor(vfsp->vfs_dev));
 
 	if (fsep != NULL) {
+		fuse_destroy_cache(fsep);
 		/* Mark the filesystem as unmounted */
 		fsep->mounted = 0;
 

@@ -133,6 +133,7 @@ fuse_avl_cache_node_t *fuse_avl_cache_node_create(vnode_t *np, uint64_t inode,
     uint64_t par_nodeid, unsigned short namelen, char *name);
 fuse_msg_node_t *fuse_setup_message(size_t argsize, enum fuse_opcode op,
     uint64_t nodeid, cred_t *credp, uint64_t unique);
+void fuse_destroy_cache(fuse_session_t *sep);
 
 #ifdef	__cplusplus
 }

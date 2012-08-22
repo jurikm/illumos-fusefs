@@ -115,7 +115,9 @@ static int fuse_getpage(struct vnode *vp, offset_t off, size_t len,
     uint_t *protp, page_t *pl[], size_t plsz, struct seg *seg, caddr_t addr,
     enum seg_rw rw, struct cred *credp, caller_context_t *ct);
 static int fuse_putpage(struct vnode *vp, offset_t off, size_t len, int flags,
-	struct cred *credp, caller_context_t *ct);
+    struct cred *credp, caller_context_t *ct);
+static int fuse_putapage(vnode_t *vp, page_t *pp, u_offset_t *offp,
+    size_t *lenp, int flags, cred_t *credp);
 static int fuse_map(vnode_t *, offset_t, struct as *, caddr_t *, size_t,
     uchar_t, uchar_t, uint_t, cred_t *, caller_context_t *);
 static int fuse_addmap(vnode_t *, offset_t, struct as *, caddr_t,  size_t,
@@ -2976,6 +2978,55 @@ fuse_vnode_free(struct vnode *vp, fuse_session_t *sep)
 
 	vn_free(vp);
 }
+
+/*
+ *		Destroy all cached data when unmounting
+ */
+
+void fuse_destroy_cache(fuse_session_t *sep)
+{
+	fuse_avl_cache_node_t *item;
+	int failed;
+
+	item = (fuse_avl_cache_node_t*)avl_first(&(sep->avl_cache));
+	failed = 0;
+	if (item)
+		do {
+			struct vnode *vp = item->facn_vnode_p;
+			struct fuse_fh_param fh_param;
+
+			if (vp && VTOFD(vp)) {
+				/*
+				 * Invalidate pages associated to vnode :
+				 * http://wesunsolve.net/bugid/id/6732672
+				 * http://wesunsolve.net/bugid/id/6730916
+				 */
+				if (vn_has_cached_data(vp)) {
+				/*
+				 * This calls VOP_DISPOSE() for each page
+				 * with flag == 0x10000 and dn == 0
+				 */
+					pvn_vplist_dirty(vp, 0, fuse_putapage,
+						B_INVAL, sep->usercred);
+				}
+				/* Release any file handles */
+				fh_param.vp = vp;
+				fh_param.flag = FUSE_FORCE_FH_RELEASE;
+				iterate_filehandle(vp, fuse_release_fh,
+						&fh_param, NULL);
+				/* Finally remove from our cache */
+				fuse_vnode_cache_remove(vp, sep);
+				fuse_free_vdata(vp);
+				vp->v_data = NULL;
+				if (!vn_has_cached_data(vp))
+	 				vn_free(vp);
+				item = (fuse_avl_cache_node_t*)
+						avl_first(&(sep->avl_cache));
+			} else
+				failed = 1;
+		} while (!failed && item);
+}
+
 /*
  * Insert the indicated symbolic reference entry into the directory.
  *
