@@ -58,6 +58,7 @@ extern "C" {
 
 #define	FSIZE_UPDATED		0x1	/* File size modifed by write */
 #define	FSIZE_NOT_RELIABLE	0x2	/* Cached file size might be invalid */
+#define	FSIZE_UNSENT		0x4	/* File size update not started */
 
 #define	FUSE_FORCE_FH_RELEASE	0x1	/* force release of filehandle */
 
@@ -117,6 +118,7 @@ typedef struct fuse_vnode_data {
 #endif
 	size_t fsize;	/* temp place holder when file size gets modified */
 	int file_size_status; /* indicates if cached file size is valid */
+	offset_t offset; /* offset of (single) unsent page */
 
 	kmutex_t f_lock; /* serializes write/setattr requests */
 	long f_mapcnt;	/* mappings to file pages */

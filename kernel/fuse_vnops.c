@@ -866,6 +866,28 @@ static int fuse_discard_name(struct vnode *vp, fuse_session_t *sep)
 	return (0);
 }
 
+/*
+ *		Flush any unsent data not sent to putpage()
+ *
+ *	This is required at close() and truncate()
+ */
+
+static int flush_unsent_data(struct vnode *vp, struct cred *credp,
+					caller_context_t *ct)
+{
+	fuse_vnode_data_t *vdata;
+	int err;
+
+	err = 0;
+	vdata = (fuse_vnode_data_t*)vp->v_data;
+	if (vdata && (vdata->file_size_status & FSIZE_UNSENT)) {
+		vdata->file_size_status &= ~FSIZE_UNSENT;
+		err = VOP_PUTPAGE(vp, vdata->offset,
+			(size_t)0, 0, credp, ct);
+	}
+	return (err);
+}
+
 /* ARGSUSED */
 static int fuse_close(struct vnode *vp, int flags, int count,
     offset_t offset, struct cred *credp, caller_context_t *ct)
@@ -876,6 +898,13 @@ static int fuse_close(struct vnode *vp, int flags, int count,
 	fuse_session_t *sep;
 	enum fuse_opcode op = (vp->v_type == VDIR) ?
 	    FUSE_RELEASEDIR : FUSE_RELEASE;
+
+		/* First, send unsent data */
+	if (vp && vp->v_data) {
+		err = flush_unsent_data(vp, credp, ct);
+		if (err)
+			return (err);
+	}
 
 	sep = fuse_minor_get_session(getminor(vp->v_rdev));
 	if (sep == NULL) {
@@ -1209,6 +1238,8 @@ wrfuse(struct vnode *vp, struct uio *uiop, int ioflag,
 	caddr_t base;		/* base of segmap */
 	ssize_t bytes;
 	int err;
+	offset_t unsent_offset; /* offset of a single unsent page */
+	fuse_vnode_data_t *vdata;
 	int pagecreate, newpage;
 	ssize_t premove_resid;
 	uint_t flags;
@@ -1222,6 +1253,22 @@ wrfuse(struct vnode *vp, struct uio *uiop, int ioflag,
 	if (limit == RLIM64_INFINITY || limit > MAXOFFSET_T)
 		limit = MAXOFFSET_T;
 
+	unsent_offset = start_off & PAGEMASK;
+		/*
+		 * If there is unsent data in a page not covered by
+		 * the current write, sent it first.
+		 * Maybe this is not needed (depends on the meaning
+		 * of offset in putpage()), anyway it is safer.
+		 */
+	vdata = (fuse_vnode_data_t*)vp->v_data;
+	if (vdata && (vdata->file_size_status & FSIZE_UNSENT)) {
+		if ((vdata->offset < (offset_t)(uiop->uio_loffset & PAGEMASK))
+		   || (vdata->offset
+			> (offset_t)((uiop->uio_loffset + uiop->uio_resid - 1)
+					& PAGEMASK)))
+			flush_unsent_data(vp, credp, ct);
+		vdata->file_size_status &= ~FSIZE_UNSENT;
+	}
 	if ((rlim64_t)uiop->uio_loffset >= limit) {
 		proc_t *p = ttoproc(curthread);
 
@@ -1277,9 +1324,29 @@ wrfuse(struct vnode *vp, struct uio *uiop, int ioflag,
 		premove_resid = uiop->uio_resid;
 
 		if (vpm_enable) {
-			err = vpm_data_copy(vp, uoff, bytes, uiop, !pagecreate,
-				    &newpage, pagecreate && pageoff, S_WRITE);
+				/*
+				 * If we are about to copy a partial page
+				 * and there are ready pages, flush them now
+				 */
+			if ((unsent_offset < 0)
+			    && ((uoff + bytes) & PAGEOFFSET)) {
+				err = VOP_PUTPAGE(vp, (offset_t)(start_off & PAGEMASK),
+				    (size_t)0, 0, credp, ct);
+				/* next page need not be sent */
+				unsent_offset = (uoff + bytes) & PAGEMASK;
+			}
+				/* copy the page, unless we go an error */
+			if (!err) {
+				err = vpm_data_copy(vp, uoff, bytes, uiop,
+					    !pagecreate, &newpage,
+					    pagecreate && pageoff, S_WRITE);
+				/* flush if this is a full page */
+				if (!((uoff + bytes) & PAGEOFFSET)) {
+					unsent_offset = -1;
+				}
+			}
 		} else {
+			unsent_offset = -1;
 			segmap_offset = (uoff & PAGEMASK) & MAXBOFFSET;
 			base = segmap_getmapflt(segkmap, vp,
 			    uoff & MAXBMASK, PAGESIZE, !pagecreate, S_WRITE);
@@ -1401,10 +1468,16 @@ wrfuse(struct vnode *vp, struct uio *uiop, int ioflag,
 		}
 	} while (uiop->uio_resid > 0 && err == 0 && bytes != 0);
 out:
-	/* if we did write any data, then try flushing it out to daemon */
+	/* if we did write any data, then flush it out to daemon if needed */
 	if (start_resid != uiop->uio_resid) {
-		err = VOP_PUTPAGE(vp, (offset_t)(start_off & PAGEMASK),
-		    (size_t)0, 0, credp, ct);
+		if (unsent_offset < 0)
+			err = VOP_PUTPAGE(vp, (offset_t)(start_off & PAGEMASK),
+			    (size_t)0, 0, credp, ct);
+		else {
+			VTOFD(vp)->offset = unsent_offset;
+			fsize_change_notify(vp, fsize,
+					FSIZE_UNSENT | FSIZE_UPDATED);
+		}
 	}
 
 	return (err);
@@ -1436,7 +1509,11 @@ static void fuse_set_getattr(struct vnode *vp, struct vattr *vap,
     struct fuse_attr *attr)
 {
 	vap->va_mode = attr->mode & MODEMASK;
-	vap->va_size = attr->size;
+		/* return cached size if some data were not flushed */
+	if (vp->v_data && (VTOFD(vp)->file_size_status & FSIZE_UPDATED))
+		vap->va_size = VTOFD(vp)->fsize;
+	else
+		vap->va_size = attr->size;
 	vap->va_atime.tv_sec = attr->atime;
 	vap->va_atime.tv_nsec = attr->atimensec;
 	vap->va_mtime.tv_sec = attr->mtime;
@@ -1596,6 +1673,17 @@ fuse_setattr(
 		return (EINVAL);
 
 	if (mask & AT_SIZE) {
+			/*
+			 * Write unsent data before truncating, only
+			 * needed for data visible after the truncation
+			 */
+		if (vap->va_size) {
+			err = flush_unsent_data(vp, credp, ct);
+			if (err)
+				return (err);
+		}
+		if (vp->v_data)
+			fsize_change_notify(vp, 0, FSIZE_NOT_RELIABLE);
 			/*
 			 * Mark all pages beyond the truncation as invalid
 			 * otherwise old data may show in holes which
