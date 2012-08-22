@@ -109,6 +109,9 @@ static int fuse_symlink(vnode_t *dvp, char *name, vattr_t *vap, char *link,
     cred_t *cr, caller_context_t *ct, int flags);
 static int fuse_readlink(vnode_t *vp, uio_t *uio, cred_t *cr,
     caller_context_t *ct);
+static int fuse_mkfifo(struct vnode *dvp, char *nm, struct vattr *vap,
+    vcexcl_t excl, int mode, struct vnode **vpp, struct cred *cred,
+    int flag, caller_context_t *ct, vsecattr_t *vsecp);
 static int fuse_space(vnode_t *vp, int cmd, struct flock64 *bfp, int flag,
     offset_t off, cred_t *cr, caller_context_t *ct);
 static int fuse_getpage(struct vnode *vp, offset_t off, size_t len,
@@ -2291,6 +2294,11 @@ fuse_create(struct vnode *dvp, char *nm, struct vattr *vap, vcexcl_t excl,
 		return (VOP_MKDIR(dvp, nm, vap, vpp, cred_p, ct, 0, va));
 	}
 
+	if (vap->va_type == VFIFO) {
+		return (fuse_mkfifo(dvp, nm, vap, excl, mode, vpp, cred_p,
+				flag, ct, va));
+	}
+
 	if (vap->va_type != VREG) {
 		DTRACE_PROBE2(fuse_create_err_invalid_type,
 		    char *, "Invalid file type",
@@ -3217,6 +3225,59 @@ fuse_readlink(vnode_t *vp, uio_t *uiop, cred_t *cred_p, caller_context_t *ct)
 #endif
 
 out:
+	fuse_free_msg(msgp);
+	return (err);
+}
+
+/*
+ * Create a FIFO
+ *
+ */
+/* ARGSUSED */
+static int
+fuse_mkfifo(struct vnode *dvp, char *name, struct vattr *vap, vcexcl_t excl,
+    int mode, struct vnode **vpp, struct cred *credp, int flag,
+    caller_context_t *ct, vsecattr_t *va)
+{
+	fuse_msg_node_t *msgp;
+	fuse_session_t *sep;
+	struct fuse_mknod_in *fmni;
+	int err = DDI_SUCCESS;
+	int namelen = strlen(name) + 1;
+
+	sep = fuse_minor_get_session(getminor(dvp->v_rdev));
+	if (sep == NULL) {
+		DTRACE_PROBE2(fuse_mkfifo_err_session,
+		    char *, "failed to find session",
+		    struct vnode *, dvp);
+		return (ENODEV);
+	}
+
+	msgp = fuse_setup_message(namelen + sizeof(*fmni), FUSE_MKNOD,
+	    VNODE_TO_NODEID(dvp), credp, FUSE_GET_UNIQUE(sep));
+
+	fmni = (struct fuse_mknod_in*)msgp->ipdata.indata;
+	fmni->mode = (vap->va_mode & ~S_IFMT) | S_IFIFO;
+	fmni->rdev = 0;
+	/* Set up arguments to the fuse library */
+	memcpy((char*)msgp->ipdata.indata + sizeof(*fmni), name, namelen - 1);
+	((char *)msgp->ipdata.indata)[sizeof(*fmni) + namelen - 1] = '\0';
+
+	if ((err = fuse_queue_request_wait(sep, msgp))) {
+		goto cleanup;
+	}
+
+	/* We got woken up, so fuse lib has replied to our release request */
+	if ((err = msgp->opdata.fouth->error) != 0) {
+		DTRACE_PROBE2(fuse_mkfifo_err_mkfifo_req,
+		    char *, "FUSE_MKFIFO request failed",
+		    struct fuse_out_header *, msgp->opdata.fouth);
+		goto cleanup;
+	}
+
+	err = fuse_add_entry(vpp, dvp, msgp, sep, name, namelen, credp, VFIFO);
+
+cleanup:
 	fuse_free_msg(msgp);
 	return (err);
 }
