@@ -218,6 +218,29 @@ _NOTE(CONSTCOND) } while (0)
 	if (VTOFD(vp))							\
 	    bzero(&(VTOFD(vp)->cached_attrs_bound), sizeof (timestruc_t));
 
+/*
+ *		Scan the avl-tree for a file whose nodeid in unknown
+ *
+ *	The tree is based on nodeid's, so avl_find() cannot help
+ */
+
+static fuse_avl_cache_node_t *avl_scan(avl_tree_t *tree,
+					fuse_avl_cache_node_t *tofind)
+{
+	fuse_avl_cache_node_t *record;
+
+	record = (fuse_avl_cache_node_t*)avl_first(tree);
+	while (record
+	    && ((record->namelen != tofind->namelen)
+		|| (record->par_nodeid != tofind->par_nodeid)
+		|| strncmp(record->name, tofind->name, tofind->namelen))) {
+			record = AVL_NEXT(tree, record);
+		}
+	if (record && !record->facn_vnode_p)
+		record = NULL;
+	return (record);
+}
+
 /* Function which allocates the requested amount of size for message passing */
 void
 fuse_buf_alloc(struct fuse_iov *iov, size_t len)
@@ -1936,8 +1959,14 @@ fuse_getvnode(uint64_t nodeid, struct vnode **vpp, v_getmode vmode,
 	int create_new = 0;
 
 	tofind.facn_nodeid = nodeid;
-	if ((foundp = avl_find(&(sep->avl_cache), &tofind,
-	    NULL)) != NULL) {
+	tofind.namelen = namelen;
+	tofind.name = name;
+	tofind.par_nodeid = parent_nid;
+	if (nodeid == FUSE_NULL_ID)
+		foundp = avl_scan(&(sep->avl_cache), &tofind);
+	else
+		foundp = avl_find(&(sep->avl_cache), &tofind, NULL);
+	if (foundp) {
 		*vpp = foundp->facn_vnode_p;
 		ASSERT(*vpp);
 		/*

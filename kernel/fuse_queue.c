@@ -329,6 +329,12 @@ fuse_avl_compare(const void *x1, const void *x2)
 	 * validate with the remaining fields of a node
 	 */
 	if (new->facn_nodeid == FUSE_NULL_ID) {
+		/*
+		 * JPA This is awfully wrong : the tree is based on
+		 * nodeid's, it cannot help if the nodeid's are missing.
+		 * A second tree would be needed. For now, avoid this
+		 * situation and do a full scan instead.
+		 */
 		if (new->namelen == old->namelen &&
 		    new->par_nodeid == old->par_nodeid) {
 			/* Compare the names for a match */
