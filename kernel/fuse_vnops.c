@@ -2147,10 +2147,17 @@ fuse_rmdir(vnode_t *dvp, char *name, vnode_t *cwd, cred_t *credp,
 		goto out;
 	}
 
-	if (vn_vfswlock(vp)) {
-		err = EBUSY;
-		goto out;
-	}
+/*
+ *	JPA This causes directories from other file systems to be locked
+ *	after the current partition is unmounted (reuse of vnode ?)
+ *	On http://wesunsolve.net/bugid/id/6651136 the use of vn_vfsrlock()
+ *	is recommended in a similar situation.
+ *
+ *	if (vn_vfswlock(vp)) {
+ *		err = EBUSY;
+ *		goto out;
+ *	}
+ */
 
 	if (vn_mountedvfs(vp)) {
 		vn_vfsunlock(vp);
