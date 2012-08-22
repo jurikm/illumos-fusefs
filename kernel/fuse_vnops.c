@@ -748,6 +748,21 @@ static int fuse_open(struct vnode **vpp, int flag, struct cred *cred_p,
 	struct vnode *vp = *vpp;
 	int err = 0;
 
+	/* Bounce the openings of special devices */
+	if (vp && (vp->v_type == VFIFO)) {
+		vnode_t	*svp;
+
+		svp = specvp(vp, vp->v_rdev, vp->v_type, cred_p);
+		VN_RELE(vp);
+		if (svp == NULL)
+			err = ENOSYS;
+		else
+			*vpp = svp;
+		if (!err)
+			err = VOP_OPEN(vpp, flag, cred_p, ct);
+		return (err);
+	}
+
 	if ((err = get_filehandle(vp, flag, cred_p, NULL,
 	    CACHE_LIST_NO_CHECK))) {
 		DTRACE_PROBE2(fuse_open_err_filehandle,
