@@ -618,6 +618,13 @@ get_filehandle(struct vnode *vp, int flag, struct cred *credp,
 		fh_param.credp = credp;
 		fh_param.rw_mode = flag;
 		fh_param.fufh = NULL;
+		if (!VTOFD(vp)) {
+			/*
+			 * Very bad : do not panic.
+			 */
+			err = ENODEV;
+			goto out;
+		}
 		/*
 		 * Check if we already have retrieved the file handle
 		 * from user space before
