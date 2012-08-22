@@ -2318,7 +2318,8 @@ fuse_create(struct vnode *dvp, char *nm, struct vattr *vap, vcexcl_t excl,
 	if (*vpp)
 		VN_RELE(*vpp);
 	if (!lku) {
-		return (0);
+		/* Cannot create an existing file with O_EXCL */
+		return (excl ? EEXIST : 0);
 	}
 
 	/*
