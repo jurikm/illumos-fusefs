@@ -1316,9 +1316,8 @@ static void fuse_set_getattr(struct vnode *vp, struct vattr *vap,
 
 	vap->va_rdev = vp->v_rdev;
 	vap->va_blksize = vp->v_vfsp->vfs_bsize;
-#define	howmany(x, y)	(((x)+((y)-1))/(y))
 
-	vap->va_nblocks = howmany(vap->va_size, vap->va_blksize);
+	vap->va_nblocks = attr->blocks;
 	/* TBD: What value should we set here ? */
 	vap->va_seq = 0;
 	vap->va_fsid = vp->v_vfsp->vfs_dev;
