@@ -2785,6 +2785,7 @@ fuse_rename(vnode_t *sdvp, char *oldname, vnode_t *tdvp, char *newname,
 {
 	int err = EIO;
 	int samedir;
+	fuse_session_t *sep;
 	struct vnode *svp = NULL;
 	struct vnode *tvp = NULL;
 
@@ -2864,9 +2865,54 @@ fuse_rename(vnode_t *sdvp, char *oldname, vnode_t *tdvp, char *newname,
 			goto errout;
 		}
 	}
-	/* Inform daemon to handle the rename operation */
-	if ((err = fuse_rename_i(sdvp, oldname, tdvp, newname, credp)))
-		goto errout;
+
+	/* Make sure to have everything ready for renaming */
+	sep = fuse_minor_get_session(getminor(sdvp->v_rdev));
+	if (sep) {
+		fuse_avl_cache_node_t find, *renamep;
+		char *wanted_name = (char*)NULL;
+
+		find.facn_nodeid = VNODE_TO_NODEID(svp);
+		renamep = avl_find(&(sep->avl_cache), &find, NULL);
+		wanted_name = kmem_alloc(strlen(newname) + 1, KM_SLEEP);
+		if (renamep && wanted_name) {
+			/* Inform daemon to handle the rename operation */
+			if ((err = fuse_rename_i(sdvp, oldname, tdvp,
+							newname, credp))) {
+				kmem_free(wanted_name, strlen(newname) + 1);
+				goto errout;
+			} else {
+			/*
+			 * If renaming was successful, the cached entries
+			 * do not match what is stored in the file system
+			 * any more.
+			 * The old target, if any, has been deleted,
+			 * the source has kept its nodeid, but its name
+			 * has changed, so do the same in the cache.
+			 */
+				if (tvp) {
+					VN_RELE(tvp);
+					if (tvp != svp)
+						fuse_vnode_free(tvp, sep);
+					tvp = (struct vnode*)NULL;
+				}
+				avl_remove(&(sep->avl_cache), renamep);
+				kmem_free(renamep->name, renamep->namelen);
+				renamep->par_nodeid = VNODE_TO_NODEID(tdvp);
+				renamep->namelen = strlen(newname) + 1;
+				renamep->name = wanted_name;
+				strlcpy(renamep->name, newname,
+							renamep->namelen);
+				avl_add(&(sep->avl_cache), renamep);
+			}
+		} else {
+			if (wanted_name)
+				kmem_free(wanted_name, strlen(newname) + 1);
+			err = ENOENT;
+		}
+	} else {
+		err = ENODEV;
+	}
 
 errout:
 	if (svp)
