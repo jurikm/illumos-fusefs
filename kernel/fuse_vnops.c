@@ -2974,6 +2974,7 @@ fuse_remove(vnode_t *dvp, char *name, cred_t *credp, caller_context_t *ct,
     int flags)
 {
 	int err;
+	int seen_err;
 	fuse_msg_node_t *msgp;
 	fuse_session_t *sep;
 	int namelen = strlen(name) + 1;
@@ -2985,6 +2986,15 @@ fuse_remove(vnode_t *dvp, char *name, cred_t *credp, caller_context_t *ct,
 		    char *, "failed to find session",
 		    struct vnode *, vp);
 		return (ENODEV);
+	}
+
+	/* Check if we have seen and cached the associated vnode */
+	seen_err = fuse_getvnode(FUSE_NULL_ID, &vp, VNODE_CACHED,
+	    0, sep, dvp->v_vfsp, namelen, name, VNODE_TO_NODEID(dvp), credp);
+
+	/* Do not proceed if this is a directory */
+	if (!seen_err && vp && (vp->v_type == VDIR)) {
+		return (EPERM);
 	}
 
 	msgp = fuse_setup_message(namelen, FUSE_UNLINK,
@@ -3006,11 +3016,8 @@ fuse_remove(vnode_t *dvp, char *name, cred_t *credp, caller_context_t *ct,
 		goto cleanup;
 	}
 
-	/* Check if we have seen and cached the associated vnode */
-	err = fuse_getvnode(FUSE_NULL_ID, &vp, VNODE_CACHED,
-	    0, sep, dvp->v_vfsp, namelen, name, VNODE_TO_NODEID(dvp), credp);
-
-	if (err) {
+	if (seen_err) {
+		err = seen_err;
 		if (err == ENOENT) {
 			/*
 			 * This means, we don't have this vnode, so
