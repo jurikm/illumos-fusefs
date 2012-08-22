@@ -1623,6 +1623,9 @@ fuse_link(struct vnode *dvp, struct vnode *srcvp, char *tnm,
 		    struct vnode *, dvp);
 		return (ENODEV);
 	}
+	/* Directories cannot be linked */
+	if (srcvp->v_type == VDIR)
+		return (EPERM);
 
 	msgp = fuse_setup_message(sizeof (*fli) + nmlen, FUSE_LINK,
 	    VNODE_TO_NODEID(dvp), credp, FUSE_GET_UNIQUE(sep));
