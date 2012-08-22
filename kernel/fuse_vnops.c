@@ -2221,6 +2221,7 @@ sendmsg:
 		 * XXX: This call releases vnode with vn_free, can this
 		 * be an issue? Or does VN_RELE do the required job for us?
 		 */
+		VN_RELE(vp);
 		fuse_vnode_free(vp, sep);
 		vp = NULL;
 	}
@@ -2997,6 +2998,7 @@ fuse_remove(vnode_t *dvp, char *name, cred_t *credp, caller_context_t *ct,
 	 * XXX: This call releases vnode with vn_free, can this
 	 * be an issue? Or does VN_RELE do the required job for us?
 	 */
+	VN_RELE(vp);
 	fuse_vnode_free(vp, sep);
 cleanup:
 	fuse_free_msg(msgp);
@@ -3031,6 +3033,7 @@ fuse_vnode_free(struct vnode *vp, fuse_session_t *sep)
 	}
 	vp->v_data = NULL;
 
+	VFS_RELE(vp->v_vfsp);
 	if (!vn_has_cached_data(vp)) /* be safe : better leak than corruption */
 		vn_free(vp);
 }
@@ -3074,6 +3077,7 @@ void fuse_destroy_cache(fuse_session_t *sep)
 				fuse_vnode_cache_remove(vp, sep);
 				fuse_free_vdata(vp);
 				vp->v_data = NULL;
+				VFS_RELE(vp->v_vfsp);
 				if (!vn_has_cached_data(vp))
 	 				vn_free(vp);
 				item = (fuse_avl_cache_node_t*)
