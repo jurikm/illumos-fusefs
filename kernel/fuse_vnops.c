@@ -567,8 +567,8 @@ fuse_release_fh(struct fuse_file_handle *fhp, struct fuse_fh_param *param)
 static int
 fuse_std_filecheck(struct fuse_file_handle *fhp, struct fuse_fh_param *param)
 {
-	if (((param->rw_mode & (FREAD | FWRITE | FAPPEND)) &
-	    (fhp->mode & (FREAD | FWRITE | FAPPEND))) &&
+	if ((param->rw_mode & fhp->mode
+			 & (FREAD | FWRITE | FAPPEND | FCREAT)) &&
 	    crgetuid(param->credp) == crgetuid(fhp->credp) &&
 	    crgetgid(param->credp) == crgetgid(fhp->credp) &&
 	    curproc->p_pidp->pid_id == fhp->process_id) {
@@ -714,7 +714,7 @@ resp_intrprt:
 	fhp->fh_id = foout->fh;
 	fhp->flags = foout->open_flags;
 
-	fhp->mode = flag & ~(O_CREAT | O_EXCL | O_NOCTTY | O_TRUNC);
+	fhp->mode = flag & ~(O_EXCL | O_NOCTTY | O_TRUNC);
 	crhold(credp);
 	fhp->credp = credp;
 	fhp->ref = 1;
@@ -1562,11 +1562,13 @@ fuse_setattr(
 	int err = 0;
 	fuse_msg_node_t *msgp;
 	struct fuse_setattr_in *fsai;
+	struct fuse_file_handle *fhp;
 	struct vattr va;
 	enum vtype vtyp;
 	long int mask = vap->va_mask;
 	fuse_session_t *sep;
 
+	fhp = (struct fuse_file_handle*)NULL;
 	sep = fuse_minor_get_session(getminor(vp->v_rdev));
 	if (sep == NULL) {
 		DTRACE_PROBE2(fuse_setattr_err_session,
@@ -1634,13 +1636,36 @@ fuse_setattr(
 	}
 
 	if (mask & AT_SIZE) {
+		struct fuse_fh_param  fh_param;
+
 		fsai->FUSEATTR(size) = vap->va_size;
 		fsai->valid |= FATTR_SIZE;
+		/*
+		 * For ftruncate() we must provide the file system with
+		 * its file handle.
+		 * We cannot tell whether truncate() or ftruncate()
+		 * was used, we can only check whether the calling
+		 * process has a create handle on the file.
+		 */
+		fh_param.credp = credp;
+		fh_param.rw_mode = FCREAT;
+		fh_param.fufh = NULL;
+		if (vp->v_wrcnt
+		   && (iterate_filehandle(vp, fuse_std_filecheck, &fh_param,
+								&fhp))) {
+			fsai->fh = fhp->fh_id;
+			fsai->valid |= FATTR_FH;
+		} else
+			fhp = (struct fuse_file_handle*)NULL;
 	}
 	/* if we received a signal or daemon replied with an error */
 	if ((err = fuse_queue_request_wait(sep, msgp)) != 0) {
+		if (fhp)
+			fhp->ref--;
 		goto cleanup;
 	}
+	if (fhp)
+		fhp->ref--;
 	if ((err = msgp->opdata.fouth->error) != 0) {
 		DTRACE_PROBE2(fuse_setattr_err_setattr_req,
 		    char *, "FUSE_SETATTR request failed",
@@ -1812,13 +1837,36 @@ fuse_access_i(void *vvp, int mode, struct cred *credp)
 			fai->mask |= W_OK;
 		if (mode & VEXEC)
 			fai->mask |= X_OK;
+		/*
+		 * Do not request a check from the file system if the
+		 * file is being created by the current process.
+		 * This is a workaround needed to allow ftruncate()
+		 * for the process having a write descriptor to the file
+		 * it is currently creating as read-only.
+		 */
+		if ((mode & VWRITE) && vp->v_wrcnt) {
+			struct fuse_fh_param fh_param;
+			struct fuse_file_handle *fhp;
+
+			fh_param.credp = credp;
+			fh_param.rw_mode = FCREAT;
+			fh_param.fufh = NULL;
+			if (vp->v_wrcnt
+			   && (iterate_filehandle(vp, fuse_std_filecheck,
+						&fh_param, &fhp))) {
+				fhp->ref--;
+				fai->mask &= ~W_OK;
+			}
+		}
 
 		/*
 		 * queue the message for sending to userland filesystem
-		 * lib framework
+		 * lib framework, unless there is nothing to check
 		 */
-		err = fuse_queue_request_wait(sep, msgp);
-		if (!(err)) {
+
+		if (fai->mask)
+			err = fuse_queue_request_wait(sep, msgp);
+		if (fai->mask && !err) {
 			/*
 			 * We got woken up, so fuse library has replied to
 			 * our request
