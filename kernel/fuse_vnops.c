@@ -2985,6 +2985,11 @@ fuse_vnode_free(struct vnode *vp, fuse_session_t *sep)
 	struct fuse_vnode_data *fvdatap = VTOFD(vp);
 
 	if (VTOFD(vp)) {
+			/* Invalidate cached pages */
+		if (vn_has_cached_data(vp)) {
+			pvn_vplist_dirty(vp, 0, fuse_putapage,
+					 B_INVAL, sep->usercred);
+		}
 		mutex_enter(&fvdatap->fh_list_lock);
 		for (fhp = list_head(&fvdatap->fh_list); fhp;
 		    fhp = list_next(&fvdatap->fh_list, fhp)) {
