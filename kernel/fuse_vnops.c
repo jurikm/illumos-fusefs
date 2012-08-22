@@ -2540,8 +2540,6 @@ fuse_readdir(struct vnode *dvp, struct uio *uiop, struct cred *cred_p,
 		return (EIO);
 	}
 
-	fh->ref++;
-
 	/* setup fuse i/o data structure */
 	fiodata.uiop = uiop;
 	fiodata.credp = cred_p;
