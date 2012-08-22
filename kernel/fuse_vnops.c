@@ -2853,7 +2853,7 @@ fuse_rename(vnode_t *sdvp, char *oldname, vnode_t *tdvp, char *newname,
 	if (tvp) {
 		if ((tvp->v_type == VDIR && svp->v_type != VDIR) ||
 		    (tvp->v_type != VDIR && svp->v_type == VDIR)) {
-			err = ENOTDIR;
+			err = (tvp->v_type == VDIR ? EISDIR : ENOTDIR);
 			goto errout;
 		}
 	}
