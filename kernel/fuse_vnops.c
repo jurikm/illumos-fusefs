@@ -2746,6 +2746,14 @@ fuse_rename_i(struct vnode *sdvp, char *oldname, struct vnode *tdvp,
 	(void) memcpy(strptr, newname, new_namelen);
 
 	err = fuse_queue_request_wait(sep, msgp);
+	if (!err) {
+		/* Check for any error from fuse library */
+		if ((err = msgp->opdata.fouth->error) != 0) {
+			DTRACE_PROBE2(fuse_rename_err,
+				char *, "FUSE_RENAME request failed",
+				struct fuse_out_header *, msgp->opdata.fouth);
+		}
+	}
 	fuse_free_msg(msgp);
 	return (err);
 }
