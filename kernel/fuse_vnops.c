@@ -713,6 +713,15 @@ static int fuse_open(struct vnode **vpp, int flag, struct cred *cred_p,
 		goto out;
 	}
 
+	if ((flag & (FWRITE | FTRUNC | FAPPEND)) == (FWRITE | FTRUNC)) {
+		vattr_t va;
+		int err;
+
+		va.va_mask = AT_SIZE;
+		va.va_size = 0;
+		err = VOP_SETATTR(vp, &va, 0, cred_p, ct);
+	}
+
 	/*
 	 * TBD: Check can we do any optimization here? FreeBSD Fuse invokes
 	 * vnode_create_vobject to avoid as it says needless getattr...
@@ -2236,6 +2245,13 @@ fuse_create(struct vnode *dvp, char *nm, struct vattr *vap, vcexcl_t excl,
 		    char *, "Invalid file type",
 		    struct vattr *, vap);
 		return (EINVAL);
+	}
+
+	int lku = fuse_lookup_i(dvp, nm, vpp, cred_p);
+	if (*vpp)
+		VN_RELE(*vpp);
+	if (!lku) {
+		return (0);
 	}
 
 	/*
