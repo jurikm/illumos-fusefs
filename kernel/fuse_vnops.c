@@ -2976,7 +2976,8 @@ fuse_vnode_free(struct vnode *vp, fuse_session_t *sep)
 	}
 	vp->v_data = NULL;
 
-	vn_free(vp);
+	if (!vn_has_cached_data(vp)) /* be safe : better leak than corruption */
+		vn_free(vp);
 }
 
 /*
