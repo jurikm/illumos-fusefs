@@ -52,6 +52,7 @@ extern "C" {
  */
 #define	CACHE_LIST_NO_CHECK 0
 #define	CACHE_LIST_CHECK 1
+#define	CACHE_CHECK_ONLY 2
 
 #define	FUSE_NULL_ID	0
 

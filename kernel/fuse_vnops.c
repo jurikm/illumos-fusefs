@@ -662,6 +662,10 @@ get_filehandle(struct vnode *vp, int flag, struct cred *credp,
 		if (iterate_filehandle(vp, fuse_std_filecheck, &fh_param,
 		    fufhpp))
 			goto out;
+		if (check_cache & CACHE_CHECK_ONLY) {
+			err = ENOENT;
+			goto out;
+		}
 	}
 	/*
 	 * Allocate a new message node only if create_filehandle wasn't able
@@ -822,10 +826,18 @@ static int fuse_close(struct vnode *vp, int flags, int count,
 		return (ENODEV);
 	}
 
-	if ((err = get_filehandle(vp, flags, credp, &fhp, CACHE_LIST_CHECK))) {
+	/*
+	 * JPA Only check within the cache, if not referenced in the
+	 * cache, there is nothing to do.
+	 * This happens in obscure circumstances related to "rm -rf"
+	 */
+	if ((err = get_filehandle(vp, flags, credp, &fhp,
+				CACHE_LIST_CHECK | CACHE_CHECK_ONLY))) {
 		DTRACE_PROBE2(fuse_close_err_filehandle,
 		    char *, "get_filehandle failed",
 		    struct vnode *, vp);
+		if (err == ENOENT)
+			err = 0;
 		goto cleanup;
 	}
 
