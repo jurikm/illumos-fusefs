@@ -807,6 +807,38 @@ cleanup:
 	return (err);
 }
 
+/*
+ *		Discard a file name
+ *
+ * If the file was open, and it does not have any names left,
+ * the file will be deleted later, when it is not open any more.
+ * Just remove its name from the cache, so that the cached entry
+ * will be deleted when the file is closed.
+ */
+
+static int fuse_discard_name(struct vnode *vp, fuse_session_t *sep)
+{
+	fuse_avl_cache_node_t find, *unnamep;
+
+	if ((vp->v_type != VREG)
+	    || (!vp->v_rdcnt && !vp->v_wrcnt)) {
+		VN_RELE(vp);
+		fuse_vnode_free(vp, sep);
+	} else {
+		find.facn_nodeid = VNODE_TO_NODEID(vp);
+		unnamep = avl_find(&(sep->avl_cache), &find, NULL);
+		if (unnamep) {
+			avl_remove(&(sep->avl_cache), unnamep);
+			kmem_free(unnamep->name, unnamep->namelen);
+			unnamep->name = "";
+			unnamep->namelen = 0;
+			avl_add(&(sep->avl_cache), unnamep);
+		}
+		VN_RELE(vp);
+	}
+	return (0);
+}
+
 /* ARGSUSED */
 static int fuse_close(struct vnode *vp, int flags, int count,
     offset_t offset, struct cred *credp, caller_context_t *ct)
@@ -854,6 +886,22 @@ static int fuse_close(struct vnode *vp, int flags, int count,
 
 		err = fuse_send_release(sep, fhp, op, vp, flags);
 		kmem_free(fhp, sizeof (*fhp));
+	}
+	/*
+	 * If the file is not open any more (is this the same as having
+	 * a ref count of 1 above ?), check whether deleting the file
+	 * has been requested while it was open.
+	 * If so, release the file so that it becomes inactive and
+	 * can be deleted.
+	 */
+	if ((vp->v_type != VDIR) && ((vp->v_rdcnt + vp->v_wrcnt) == 1)) {
+		fuse_avl_cache_node_t find, *closep;
+
+		find.facn_nodeid = VNODE_TO_NODEID(vp);
+		closep = avl_find(&(sep->avl_cache), &find, NULL);
+		if (closep && !closep->namelen) {
+			VN_RELE(vp);
+		}
 	}
 cleanup:
 	return (err);
@@ -2914,12 +2962,10 @@ fuse_rename(vnode_t *sdvp, char *oldname, vnode_t *tdvp, char *newname,
 			 * the source has kept its nodeid, but its name
 			 * has changed, so do the same in the cache.
 			 */
-				if (tvp) {
-					VN_RELE(tvp);
-					if (tvp != svp)
-						fuse_vnode_free(tvp, sep);
-					tvp = (struct vnode*)NULL;
+				if (tvp && (tvp != svp)) {
+					err = fuse_discard_name(tvp, sep);
 				}
+				tvp = (struct vnode*)NULL;
 				avl_remove(&(sep->avl_cache), renamep);
 				kmem_free(renamep->name, renamep->namelen);
 				renamep->par_nodeid = VNODE_TO_NODEID(tdvp);
@@ -3111,8 +3157,7 @@ fuse_remove(vnode_t *dvp, char *name, cred_t *credp, caller_context_t *ct,
 	 * XXX: This call releases vnode with vn_free, can this
 	 * be an issue? Or does VN_RELE do the required job for us?
 	 */
-	VN_RELE(vp);
-	fuse_vnode_free(vp, sep);
+	err = fuse_discard_name(vp, sep);
 cleanup:
 	fuse_free_msg(msgp);
 	return (err);
@@ -3854,6 +3899,7 @@ fuse_inactive(struct vnode *vp, struct cred *credp, caller_context_t *ct)
 {
 	struct fuse_fh_param fh_param;
 	fuse_session_t *sep;
+	int deleted;
 
 	fh_param.vp = vp;
 	fh_param.flag = 0;
@@ -3866,27 +3912,45 @@ fuse_inactive(struct vnode *vp, struct cred *credp, caller_context_t *ct)
 		return;
 	}
 
-	(void) iterate_filehandle(vp, fuse_release_fh, &fh_param, NULL);
+	/*
+	 * The file may have been deleted while if was open,
+	 * if so, remove from cache.
+	 */
+	deleted = 0;
 
-	mutex_enter(&vp->v_lock);
-	if (vp->v_count > 1) {
-		vp->v_count--;
-		mutex_exit(&vp->v_lock);
-		return;
+	if (vp->v_data && (vp->v_type != VDIR)
+	    && !vp->v_rdcnt && !vp->v_wrcnt) {
+		fuse_avl_cache_node_t find, *closep;
+
+		find.facn_nodeid = VNODE_TO_NODEID(vp);
+		closep = avl_find(&(sep->avl_cache), &find, NULL);
+		if (closep && !closep->namelen) {
+			fuse_vnode_free(vp, sep);
+			deleted = 1;
+		}
 	}
-	mutex_exit(&vp->v_lock);
+	if (!deleted && vp->v_data) {
+		(void) iterate_filehandle(vp, fuse_release_fh, &fh_param, NULL);
+		mutex_enter(&vp->v_lock);
+		if (vp->v_count > 1) {
+			vp->v_count--;
+			mutex_exit(&vp->v_lock);
+			return;
+		}
+		mutex_exit(&vp->v_lock);
 #ifndef FLUSH_DATA_ON_VNODE_RELEASE
 
 	/*
 	 * We don't free any pages associated with this vnode, nor do we
 	 * remove it from the AVL tree
 	 */
-	return;
+		return;
 #else
-	if (!(vp->v_flag & VROOT)) {
-		fuse_vnode_destroy(vp, credp, sep);
-	}
+		if (!(vp->v_flag & VROOT)) {
+			fuse_vnode_destroy(vp, credp, sep);
+		}
 #endif
+	}
 }
 
 static int
