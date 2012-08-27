@@ -29,7 +29,7 @@ CTFMERGE = ctfmerge
 CTFCONVERT = ctfconvert
 LINT = lint
 
-CCFLAGS = $(CFLAGS) -g -D_KERNEL -D__SOLARIS__
+CCFLAGS = $(CFLAGS) -O2 -D_KERNEL -D__SOLARIS__
 LLINTFLAGS =  -sxnuF -errtags -errsecurity=extended $(LINTFLAGS) -D_KERNEL -D__SOLARIS__
 LD = /usr/ccs/bin/ld
 
