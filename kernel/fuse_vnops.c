@@ -26,7 +26,7 @@
  * Copyright 2009 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  *
- * Portions Copyright 2012 Jean-Pierre Andre
+ * Portions Copyright 2012-2013 Jean-Pierre Andre
  */
 /*
  * This file has been derived from OpenSolaris devfs and others in uts/common/fs
@@ -869,7 +869,7 @@ static int fuse_discard_name(struct vnode *vp, fuse_session_t *sep)
 /*
  *		Flush any unsent data not sent to putpage()
  *
- *	This is required at close() and truncate()
+ *	This is required at close(), truncate() and utime()
  */
 
 static int flush_unsent_data(struct vnode *vp, struct cred *credp,
@@ -1672,16 +1672,19 @@ fuse_setattr(
 	if (mask & AT_NOSET)
 		return (EINVAL);
 
-	if (mask & AT_SIZE) {
+	if ((mask & (AT_SIZE | AT_MTIME | AT_ATIME))
+	    && (vap->va_size)) {
 			/*
 			 * Write unsent data before truncating, only
-			 * needed for data visible after the truncation
+			 * needed for data visible after the truncation.
+			 * Do the same before setting the time stamps to
+			 * preserve the ordering of time stamp changes.
 			 */
-		if (vap->va_size) {
-			err = flush_unsent_data(vp, credp, ct);
-			if (err)
-				return (err);
-		}
+		err = flush_unsent_data(vp, credp, ct);
+		if (err)
+			return (err);
+	}
+	if (mask & AT_SIZE) {
 		if (vp->v_data)
 			fsize_change_notify(vp, 0, FSIZE_NOT_RELIABLE);
 			/*
