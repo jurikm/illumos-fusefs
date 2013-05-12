@@ -42,9 +42,10 @@
 #include <sys/sunddi.h> /* used by all entry points for this driver */
 			/* also used by cb_ops, ddi_create_minor_node, */
 			/* ddi_get_instance, and ddi_prop_op */
-
+#include <sys/cmn_err.h>
 
 #include <sys/atomic.h>	/* used for debugging, added atomic counter */
+#include "fuse_kernel.h"
 
 extern struct modldrv fuse_dev_drv_modldrv;
 extern struct modlfs fuse_vfs_modldrv;
@@ -68,6 +69,10 @@ _init(void)
 {
 	int rv;
 
+	cmn_err(CE_CONT,"Fuse kernel %s interface %d.%d\n", FUSE_SOLARIS_VERSION,
+		FUSE_KERNEL_VERSION, FUSE_KERNEL_MINOR_VERSION);
+	cmn_err(CE_CONT,"Fuse kernel init at 0x%lx, modldrv at 0x%lx\n",
+		(long)_init,(long)&fuse_dev_drv_modldrv);
 	fuse_global_init();
 	if ((rv = mod_install(&ml)) != 0) {
 		fuse_global_fini();
