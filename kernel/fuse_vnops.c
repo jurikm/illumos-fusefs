@@ -2031,7 +2031,7 @@ fuse_access_inkernelcheck(void *vvp, int mode, struct cred *credp)
 	/* Check access based on owner, group and public permissions */
 	if (crgetuid(credp) != va.va_uid) {
 		shift += MODESHIFT;
-		if (groupmember(va.va_gid, credp))
+		if (!groupmember(va.va_gid, credp))
 			shift += MODESHIFT;
 	}
 	/* Compute missing mode bits */
