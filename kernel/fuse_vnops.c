@@ -2117,6 +2117,11 @@ static int fuse_lookup(struct vnode *dvp, char *nm, struct vnode **vpp,
 	 * if this is the root of our filesystem, we will check
 	 * for valid access permissions
 	 */
+	if (!VTOFD(dvp)) {
+		err = EIO; /* does not look like a fuse-type directory */
+		goto out;
+	}
+
 	if ((VTOFD(dvp))->nodeid == FUSE_ROOT_ID) {
 		if (err = fuse_access(dvp, VEXEC, flags, credp, ct)) {
 			DTRACE_PROBE2(fuse_lookup_err_access,
