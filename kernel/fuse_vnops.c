@@ -1762,10 +1762,11 @@ fuse_setattr(
 		 * its file handle.
 		 * We cannot tell whether truncate() or ftruncate()
 		 * was used, we can only check whether the calling
-		 * process has a create handle on the file.
+		 * process has a write or create handle on the file to
+		 * allow truncation irrespective of current permissions.
 		 */
 		fh_param.credp = credp;
-		fh_param.rw_mode = FCREAT;
+		fh_param.rw_mode = FWRITE | FAPPEND | FCREAT;
 		fh_param.fufh = NULL;
 		if (vp->v_wrcnt
 		   && (iterate_filehandle(vp, fuse_std_filecheck, &fh_param,
@@ -1956,17 +1957,18 @@ fuse_access_i(void *vvp, int mode, struct cred *credp)
 			fai->mask |= X_OK;
 		/*
 		 * Do not request a check from the file system if the
-		 * file is being created by the current process.
+		 * file is being created or written by the current process,
 		 * This is a workaround needed to allow ftruncate()
 		 * for the process having a write descriptor to the file
-		 * it is currently creating as read-only.
+		 * when it is creating as read-only or permissions
+		 * changed since the file was opened.
 		 */
 		if ((mode & VWRITE) && vp->v_wrcnt) {
 			struct fuse_fh_param fh_param;
 			struct fuse_file_handle *fhp;
 
 			fh_param.credp = credp;
-			fh_param.rw_mode = FCREAT;
+			fh_param.rw_mode = FWRITE | FAPPEND | FCREAT;
 			fh_param.fufh = NULL;
 			if (vp->v_wrcnt
 			   && (iterate_filehandle(vp, fuse_std_filecheck,
