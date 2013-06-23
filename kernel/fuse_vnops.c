@@ -4047,14 +4047,28 @@ fuse_addmap(vnode_t *vp, offset_t off, struct as *as, caddr_t addr,
     size_t len, uchar_t prot, uchar_t maxprot, uint_t flags,
     cred_t *cr, caller_context_t *ct)
 {
+	long oldcnt;
+	int err = 0;
+	struct fuse_file_handle *fhp;
+
 	if (vp->v_flag & VNOMAP)
 		return (ENOSYS);
 
 	mutex_enter(&VTOFD(vp)->f_lock);
+	oldcnt = VTOFD(vp)->f_mapcnt;
 	VTOFD(vp)->f_mapcnt += btopr(len);
 	mutex_exit(&VTOFD(vp)->f_lock);
+	if (!oldcnt) {
+		/*
+		 * Increment the reference count on the vnode, so that
+		 * the data associated will not be freed on close()
+		 * and kept available for subsequent getapage().
+		 */
+		err = get_filehandle(vp, FREAD | FWRITE, cr, &fhp,
+					CACHE_LIST_CHECK);
+	}
 
-	return (0);
+	return (err);
 }
 
 /* ARGSUSED */
@@ -4063,6 +4077,8 @@ fuse_delmap(vnode_t *vp, offset_t off, struct as *as, caddr_t addr,
     size_t len, uint_t prot, uint_t maxprot, uint_t flags,
     cred_t *cr, caller_context_t *ct)
 {
+	int err = 0;
+
 	if (vp->v_flag & VNOMAP)
 		return (ENOSYS);
 
@@ -4074,7 +4090,15 @@ fuse_delmap(vnode_t *vp, offset_t off, struct as *as, caddr_t addr,
 	    vn_has_cached_data(vp))
 		(void) VOP_PUTPAGE(vp, off, len, B_ASYNC, cr, ct);
 
-	return (0);
+		/*
+		 * If there is no more reference to the vnode, we can
+		 * now release the data which may have been delayed
+		 * by incrementing the reference count in addmap().
+		 */
+	if (!VTOFD(vp)->f_mapcnt)
+		err = fuse_close(vp, flags | FREAD | FWRITE, 1, 0, cr, ct);
+
+	return (err);
 }
 
 static void
