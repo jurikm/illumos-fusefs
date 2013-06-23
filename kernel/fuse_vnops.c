@@ -1278,6 +1278,8 @@ wrfuse(struct vnode *vp, struct uio *uiop, int ioflag,
 		mutex_exit(&p->p_lock);
 		return (EFBIG);
 	}
+	if (!vdata)
+		return (EIO);
 	if ((err = fuse_getfilesize(vp, &fsize, credp))) {
 		DTRACE_PROBE3(wrfuse_err_filesize,
 		    char *, "fuse_getfilesize failed",
@@ -1947,6 +1949,8 @@ fuse_access_i(void *vvp, int mode, struct cred *credp)
 	if (vp->v_type == VREG && mode == VEXEC) {
 		return (fuse_access_inkernelcheck(vp, mode, credp));
 	} else {
+		if (!vp->v_data)
+			return (EIO);
 		msgp = fuse_setup_message(sizeof (*fai), FUSE_ACCESS,
 		    VNODE_TO_NODEID(vp), credp, FUSE_GET_UNIQUE(sep));
 
