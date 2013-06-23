@@ -1744,12 +1744,16 @@ fuse_setattr(
 		fsai->FUSEATTR(atime) = vap->va_atime.tv_sec;
 		fsai->FUSEATTR(atimensec) = vap->va_atime.tv_nsec;
 		fsai->valid |= FATTR_ATIME;
+		if (!(flags & ATTR_UTIME))
+			fsai->valid |= FATTR_ATIME_NOW;
 	}
 
 	if (mask & AT_MTIME) {
 		fsai->FUSEATTR(mtime) = vap->va_mtime.tv_sec;
 		fsai->FUSEATTR(mtimensec) = vap->va_mtime.tv_nsec;
 		fsai->valid |= FATTR_MTIME;
+		if (!(flags & ATTR_UTIME))
+			fsai->valid |= FATTR_MTIME_NOW;
 	}
 
 	if (mask & AT_SIZE) {
