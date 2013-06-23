@@ -928,9 +928,17 @@ static int fuse_close(struct vnode *vp, int flags, int count,
 			err = 0;
 		goto cleanup;
 	}
-
-	fhp->ref--;
-	if (fhp->ref == 1) {
+		/*
+		 * As we have made a new reference in get_filehandle(),
+		 * we have to decrement by 2 for a real close().
+		 * However there may be several close() for a single open(),
+		 * so when the count argument is not 1, this is not the
+		 * last close(), and we should only decrement by 1.
+		 * There are no known multiple close() for a directory,
+		 * though the count may be 2 (happens on a "rm -f")
+		 */
+	fhp->ref -= ((count > 1) && (vp->v_type != VDIR) ? 1 : 2);
+	if (fhp->ref <= 0) {
 		/* Remove it from the list */
 		DTRACE_PROBE2(fuse_close_info_release,
 		    char *, "releasing file handle",
@@ -944,8 +952,8 @@ static int fuse_close(struct vnode *vp, int flags, int count,
 		kmem_free(fhp, sizeof (*fhp));
 	}
 	/*
-	 * If the file is not open any more (is this the same as having
-	 * a ref count of 1 above ?), check whether deleting the file
+	 * If the file is not open any more (is this the same as getting
+	 * a ref count of 0 above ?), check whether deleting the file
 	 * has been requested while it was open.
 	 * If so, release the file so that it becomes inactive and
 	 * can be deleted.
