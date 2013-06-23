@@ -75,12 +75,14 @@ typedef struct fuse_file_handle {
 	int		ref;
 	cred_t		*credp;
 	struct file 	*filep;
+	uint64_t	nodeid;
 } fuse_file_handle_t;
 
 struct fuse_fh_param {
 	struct vnode *vp;
 	cred_t *credp;
 	struct fuse_file_handle *fufh;
+	uint64_t nodeid;
 	int rw_mode;
 	int flag;
 };

@@ -573,11 +573,16 @@ fuse_release_fh(struct fuse_file_handle *fhp, struct fuse_fh_param *param)
 static int
 fuse_std_filecheck(struct fuse_file_handle *fhp, struct fuse_fh_param *param)
 {
+		/*
+		 * The process id is not relevant, because a file
+		 * descriptor may be inherited (this is common for
+		 * for shell scripts or files being executed).
+		 */
 	if ((param->rw_mode & fhp->mode
 			 & (FREAD | FWRITE | FAPPEND | FCREAT)) &&
 	    crgetuid(param->credp) == crgetuid(fhp->credp) &&
 	    crgetgid(param->credp) == crgetgid(fhp->credp) &&
-	    curproc->p_pidp->pid_id == fhp->process_id) {
+	    (param->nodeid == fhp->nodeid)) {
 		fhp->ref++;
 		DTRACE_PROBE2(fuse_std_filecheck_info_found,
 		    char *, "Found file handle in cache list.",
@@ -600,11 +605,13 @@ iterate_filehandle(struct vnode *vp, fuse_file_check_t file_check_fp,
 	struct fuse_vnode_data *fvdatap = VTOFD(vp);
 
 	mutex_enter(&fvdatap->fh_list_lock);
-	for (fh = list_head(&fvdatap->fh_list); fh; fh = next_fh) {
-		next_fh = list_next(&fvdatap->fh_list, fh);
-		if ((ret = file_check_fp(fh, param))) {
-			*fufhpp = fh;
-			break;
+	if (VNODE_TO_NODEID(vp) != FUSE_NULL_ID) {
+		for (fh = list_head(&fvdatap->fh_list); fh; fh = next_fh) {
+			next_fh = list_next(&fvdatap->fh_list, fh);
+			if ((ret = file_check_fp(fh, param))) {
+				*fufhpp = fh;
+				break;
+			}
 		}
 	}
 	mutex_exit(&fvdatap->fh_list_lock);
@@ -651,9 +658,6 @@ get_filehandle(struct vnode *vp, int flag, struct cred *credp,
 		}
 	}
 	if ((check_cache & CACHE_LIST_CHECK)) {
-		fh_param.credp = credp;
-		fh_param.rw_mode = flag;
-		fh_param.fufh = NULL;
 		if (!VTOFD(vp)) {
 			/*
 			 * Very bad : do not panic.
@@ -665,6 +669,10 @@ get_filehandle(struct vnode *vp, int flag, struct cred *credp,
 		 * Check if we already have retrieved the file handle
 		 * from user space before
 		 */
+		fh_param.credp = credp;
+		fh_param.rw_mode = flag;
+		fh_param.nodeid = VNODE_TO_NODEID(vp);
+		fh_param.fufh = NULL;
 		if (iterate_filehandle(vp, fuse_std_filecheck, &fh_param,
 		    fufhpp))
 			goto out;
@@ -725,6 +733,7 @@ resp_intrprt:
 	fhp->credp = credp;
 	fhp->ref = 1;
 	fhp->process_id = curproc->p_pidp->pid_id;
+	fhp->nodeid = fvdatap->nodeid;
 
 	if (fufhpp)
 		*fufhpp = fhp;
@@ -752,6 +761,8 @@ static int fuse_open(struct vnode **vpp, int flag, struct cred *cred_p,
 	 * alloc filehandle and associate with vnode private operation.
 	 */
 	struct vnode *vp = *vpp;
+	struct fuse_file_handle *fhp;
+	int mode;
 	int err = 0;
 
 	/* Bounce the openings of special devices */
@@ -769,8 +780,17 @@ static int fuse_open(struct vnode **vpp, int flag, struct cred *cred_p,
 		return (err);
 	}
 
-	if ((err = get_filehandle(vp, flag, cred_p, NULL,
-	    CACHE_LIST_NO_CHECK))) {
+	/*
+	 * Not checking the cache is a problem for files opened twice as
+	 * a fuse_file_handle cannot be associated to an opening.
+	 * Checking the cache hides multiple openings in the same mode.
+	 * The latter is probably better.
+	 */
+	if (vp && vp->v_data && (VNODE_TO_NODEID(vp) != FUSE_NULL_ID))
+		mode = CACHE_LIST_CHECK;
+	else
+		mode = CACHE_LIST_NO_CHECK;
+	if ((err = get_filehandle(vp, flag, cred_p, &fhp, mode))) {
 		DTRACE_PROBE2(fuse_open_err_filehandle,
 		    char *, "get_filehandle failed",
 		    struct vnode *, vp);
@@ -1781,6 +1801,7 @@ fuse_setattr(
 		 */
 		fh_param.credp = credp;
 		fh_param.rw_mode = FWRITE | FAPPEND | FCREAT;
+		fh_param.nodeid = VNODE_TO_NODEID(vp);
 		fh_param.fufh = NULL;
 		if (vp->v_wrcnt
 		   && (iterate_filehandle(vp, fuse_std_filecheck, &fh_param,
@@ -1985,6 +2006,7 @@ fuse_access_i(void *vvp, int mode, struct cred *credp)
 
 			fh_param.credp = credp;
 			fh_param.rw_mode = FWRITE | FAPPEND | FCREAT;
+			fh_param.nodeid = VNODE_TO_NODEID(vp);
 			fh_param.fufh = NULL;
 			if (vp->v_wrcnt
 			   && (iterate_filehandle(vp, fuse_std_filecheck,
