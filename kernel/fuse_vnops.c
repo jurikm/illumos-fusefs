@@ -3966,6 +3966,12 @@ fuse_putpage(struct vnode *vp, offset_t off, size_t len, int flags,
 		err = pvn_vplist_dirty(vp, (u_offset_t)off, fuse_putapage,
 		    flags, credp);
 	} else {
+		if (!vp->v_data) {
+			cmn_err(CE_CONT,"Abnormal condition in fuse_putpage"
+				" off 0x%lx len %ld flags 0x%x\n",
+				(long)off,(long)len,(int)flags);
+			return (EIO);
+		}
 		if ((err = fuse_getfilesize(vp, &fsize, credp))) {
 			DTRACE_PROBE3(fuse_putpage_err_filesize,
 			    char *, "fuse_getfilesize failed",
