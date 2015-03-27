@@ -323,8 +323,8 @@ fuse_avl_cache_node_destroy(fuse_avl_cache_node_t *node)
 static int
 fuse_avl_compare(const void *x1, const void *x2)
 {
-	fuse_avl_cache_node_t *new = (fuse_avl_cache_node_t *)x1;
-	fuse_avl_cache_node_t *old = (fuse_avl_cache_node_t *)x2;
+	const fuse_avl_cache_node_t *new = (const fuse_avl_cache_node_t *)x1;
+	const fuse_avl_cache_node_t *old = (const fuse_avl_cache_node_t *)x2;
 
 	/*
 	 * We first check if valid nodeid is passed, if not we try to
