@@ -50,7 +50,8 @@ typedef struct fuse_session
 	kmutex_t	session_mutx;
 	ksema_t		session_sema; /* devops read sleeps over it */
 	list_t		msg_list;  /* message awaiting service rests here */
-	avl_tree_t	avl_cache; /* nodeid used to track associated vnode */
+	avl_tree_t	avl_cache_i; /* nodeid used to track associated vnode */
+	avl_tree_t	avl_cache_n; /* name used to track associated vnode */
 	kmutex_t	avl_mutx; /* serialize actions on avl_cache */
 	minor_t		minor; /* Minor number associated with this session */
 	uint32_t	state;
@@ -85,7 +86,8 @@ typedef struct fuse_avl_cache_node {
 	vnode_t	*facn_vnode_p;
 	char *name;
 	unsigned short namelen;
-	avl_node_t facn_cache_node;
+	avl_node_t faci_cache_node; /* tree by inode */
+	avl_node_t facn_cache_node; /* tree by name */
 } fuse_avl_cache_node_t;
 
 #define	FUSE_MAX_MSG 8192

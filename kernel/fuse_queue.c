@@ -42,8 +42,9 @@
 #include "fuse_queue.h"
 
 static int
-fuse_avl_compare(const void *x1, const void *x2);
-static void fuse_avl_destroy(avl_tree_t *tree_p);
+fuse_avl_compare_i(const void *x1, const void *x2);
+static int fuse_avl_compare_n(const void *x1, const void *x2);
+static void fuse_avl_destroy(avl_tree_t *tree_i, avl_tree_t *tree_n);
 
 static fuse_session_t *fuse_sessions[FUSE_MAX_SESSIONS];
 
@@ -124,7 +125,10 @@ fuse_init_session(fuse_session_t *se)
 	mutex_init(&se->avl_mutx, NULL, MUTEX_DEFAULT, NULL);
 	list_create(&se->msg_list, sizeof (fuse_msg_node_t),
 	    offsetof(fuse_msg_node_t, fmn_link));
-	avl_create(&se->avl_cache, fuse_avl_compare,
+	avl_create(&se->avl_cache_i, fuse_avl_compare_i,
+	    sizeof (fuse_avl_cache_node_t),
+	    offsetof(struct fuse_avl_cache_node, faci_cache_node));
+	avl_create(&se->avl_cache_n, fuse_avl_compare_n,
 	    sizeof (fuse_avl_cache_node_t),
 	    offsetof(struct fuse_avl_cache_node, facn_cache_node));
 	se->mounted = 0;
@@ -137,7 +141,7 @@ fuse_deinit_session(fuse_session_t *se)
 	sema_destroy(&se->session_sema);
 	mutex_destroy(&se->session_mutx);
 	list_destroy(&se->msg_list);
-	fuse_avl_destroy(&se->avl_cache);
+	fuse_avl_destroy(&se->avl_cache_i, &se->avl_cache_n);
 	fuse_session_clear_cred(se);
 }
 
@@ -284,14 +288,19 @@ err:
  *  Avl related
  */
 static void
-fuse_avl_destroy(avl_tree_t *tree_p)
+fuse_avl_destroy(avl_tree_t *tree_i, avl_tree_t *tree_n)
 {
 	void *cookie = NULL;
 	fuse_avl_cache_node_t *node;
-	while ((node = avl_destroy_nodes(tree_p, &cookie)) != NULL) {
+
+	while (avl_destroy_nodes(tree_n, &cookie) != NULL) {
+	}
+	avl_destroy(tree_n);
+	cookie = NULL;
+	while ((node = avl_destroy_nodes(tree_i, &cookie)) != NULL) {
 		fuse_avl_cache_node_destroy(node);
 	}
-	avl_destroy(tree_p);
+	avl_destroy(tree_i);
 }
 
 fuse_avl_cache_node_t *
@@ -320,8 +329,12 @@ fuse_avl_cache_node_destroy(fuse_avl_cache_node_t *node)
 	kmem_free(node, sizeof (fuse_avl_cache_node_t));
 }
 
+/*
+ *		Sort cached nodes by their inode number
+ */
+
 static int
-fuse_avl_compare(const void *x1, const void *x2)
+fuse_avl_compare_i(const void *x1, const void *x2)
 {
 	const fuse_avl_cache_node_t *new = (const fuse_avl_cache_node_t *)x1;
 	const fuse_avl_cache_node_t *old = (const fuse_avl_cache_node_t *)x2;
@@ -332,22 +345,41 @@ fuse_avl_compare(const void *x1, const void *x2)
 	 */
 	if (new->facn_nodeid == FUSE_NULL_ID) {
 		/*
-		 * JPA This is awfully wrong : the tree is based on
-		 * nodeid's, it cannot help if the nodeid's are missing.
-		 * A second tree would be needed. For now, avoid this
-		 * situation and do a full scan instead.
+		 * Cannot decently search in the inode tree without
+		 * knowing the nodeid. Must use the tree by name.
 		 */
-		if (new->namelen == old->namelen &&
-		    new->par_nodeid == old->par_nodeid) {
-			/* Compare the names for a match */
-			if (!(strncmp(new->name, old->name, new->namelen)))
-				return (0);
-		}
+		cmn_err(CE_PANIC, "Illegal search by node\n");
+		return (0);
 	} else {
 		return ((new->facn_nodeid == old->facn_nodeid) ? 0 :
 		    ((new->facn_nodeid < old->facn_nodeid) ? -1 : 1));
 	}
 	return (-1);
+}
+
+/*
+ *		Sort cached nodes by name and parent inode
+ */
+
+static int
+fuse_avl_compare_n(const void *x1, const void *x2)
+{
+	const fuse_avl_cache_node_t *new = (const fuse_avl_cache_node_t *)x1;
+	const fuse_avl_cache_node_t *old = (const fuse_avl_cache_node_t *)x2;
+	int r;
+
+	if (new->par_nodeid != old->par_nodeid) {
+		r = (new->par_nodeid < old->par_nodeid ? -1 : 1);
+	} else {
+		if (new->namelen != old->namelen)
+			r = (new->namelen < old->namelen ? -1 : 1);
+		else {
+			r = memcmp(new->name, old->name, new->namelen);
+			if (r)
+				r = (r < 0 ? -1 : 1);
+		}
+	}
+	return (r);
 }
 
 

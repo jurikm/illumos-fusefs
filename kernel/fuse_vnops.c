@@ -221,31 +221,6 @@ _NOTE(CONSTCOND) } while (0)
 	if (VTOFD(vp))							\
 	    bzero(&(VTOFD(vp)->cached_attrs_bound), sizeof (timestruc_t));
 
-/*
- *		Scan the avl-tree for a file whose nodeid in unknown
- *
- *	The tree is based on nodeid's, so avl_find() cannot help
- *
- *	All actions on the avl_tree must be serialized by avl_mutx
- */
-
-static fuse_avl_cache_node_t *avl_scan(avl_tree_t *tree,
-					fuse_avl_cache_node_t *tofind)
-{
-	fuse_avl_cache_node_t *record;
-
-	record = (fuse_avl_cache_node_t*)avl_first(tree);
-	while (record
-	    && ((record->namelen != tofind->namelen)
-		|| (record->par_nodeid != tofind->par_nodeid)
-		|| strncmp(record->name, tofind->name, tofind->namelen))) {
-			record = AVL_NEXT(tree, record);
-		}
-	if (record && !record->facn_vnode_p)
-		record = NULL;
-	return (record);
-}
-
 /* Function which allocates the requested amount of size for message passing */
 void
 fuse_buf_alloc(struct fuse_iov *iov, size_t len)
@@ -475,7 +450,7 @@ resp_intrprt:
 	/* Check if there will be a collision? */
 	tofind.facn_nodeid = feo->nodeid;
 	mutex_enter(&sep->avl_mutx);
-	foundp = avl_find(&(sep->avl_cache), &tofind, &where);
+	foundp = avl_find(&(sep->avl_cache_i), &tofind, &where);
 	mutex_exit(&sep->avl_mutx);
 	if (foundp) {
 		DTRACE_PROBE2(create_filehandle_err_collision,
@@ -491,7 +466,8 @@ resp_intrprt:
 	cache_nodep = fuse_avl_cache_node_create(vp, feo->nodeid,
 	    fvdata->fcd->par_nodeid, fvdata->fcd->namelen, fvdata->fcd->name);
 	mutex_enter(&sep->avl_mutx);
-	avl_add(&(sep->avl_cache), cache_nodep);
+	avl_add(&(sep->avl_cache_i), cache_nodep);
+	avl_add(&(sep->avl_cache_n), cache_nodep);
 	mutex_exit(&sep->avl_mutx);
 
 	release_create_data(fvdata->fcd);
@@ -868,15 +844,17 @@ static int fuse_discard_name(struct vnode *vp, fuse_session_t *sep)
 	} else {
 		find.facn_nodeid = VNODE_TO_NODEID(vp);
 		mutex_enter(&sep->avl_mutx);
-		unnamep = avl_find(&(sep->avl_cache), &find, NULL);
+		unnamep = avl_find(&(sep->avl_cache_i), &find, NULL);
 		if (unnamep) {
 			char *oldname = unnamep->name;
 			int oldnamelen = unnamep->namelen;
 
-			avl_remove(&(sep->avl_cache), unnamep);
+			avl_remove(&(sep->avl_cache_i), unnamep);
+			avl_remove(&(sep->avl_cache_n), unnamep);
 			unnamep->name = "";
 			unnamep->namelen = 0;
-			avl_add(&(sep->avl_cache), unnamep);
+			avl_add(&(sep->avl_cache_i), unnamep);
+			avl_add(&(sep->avl_cache_n), unnamep);
 			mutex_exit(&sep->avl_mutx);
 			kmem_free(oldname, oldnamelen);
 		} else
@@ -983,7 +961,7 @@ static int fuse_close(struct vnode *vp, int flags, int count,
 
 		find.facn_nodeid = VNODE_TO_NODEID(vp);
 		mutex_enter(&sep->avl_mutx);
-		closep = avl_find(&(sep->avl_cache), &find, NULL);
+		closep = avl_find(&(sep->avl_cache_i), &find, NULL);
 		mutex_exit(&sep->avl_mutx);
 		if (closep && !closep->namelen) {
 			VN_RELE(vp);
@@ -2268,9 +2246,9 @@ fuse_getvnode(uint64_t nodeid, struct vnode **vpp, v_getmode vmode,
 	tofind.par_nodeid = parent_nid;
 	mutex_enter(&sep->avl_mutx);
 	if (nodeid == FUSE_NULL_ID)
-		foundp = avl_scan(&(sep->avl_cache), &tofind);
+		foundp = avl_find(&(sep->avl_cache_n), &tofind, NULL);
 	else
-		foundp = avl_find(&(sep->avl_cache), &tofind, NULL);
+		foundp = avl_find(&(sep->avl_cache_i), &tofind, NULL);
 	mutex_exit(&sep->avl_mutx);
 	if (foundp) {
 		*vpp = foundp->facn_vnode_p;
@@ -2305,7 +2283,8 @@ fuse_getvnode(uint64_t nodeid, struct vnode **vpp, v_getmode vmode,
 		avl_nodep = fuse_avl_cache_node_create(
 		    *vpp, nodeid, parent_nid, namelen, name);
 		mutex_enter(&sep->avl_mutx);
-		avl_add(&(sep->avl_cache), avl_nodep);
+		avl_add(&(sep->avl_cache_i), avl_nodep);
+		avl_add(&(sep->avl_cache_n), avl_nodep);
 		mutex_exit(&sep->avl_mutx);
 	}
 	VTOFD(*vpp)->nlookup++;
@@ -3175,7 +3154,7 @@ fuse_rename(vnode_t *sdvp, char *oldname, vnode_t *tdvp, char *newname,
 
 		find.facn_nodeid = VNODE_TO_NODEID(svp);
 		mutex_enter(&sep->avl_mutx);
-		renamep = avl_find(&(sep->avl_cache), &find, NULL);
+		renamep = avl_find(&(sep->avl_cache_i), &find, NULL);
 		mutex_exit(&sep->avl_mutx);
 		wanted_name = kmem_alloc(strlen(newname) + 1, KM_SLEEP);
 		if (renamep && wanted_name) {
@@ -3201,7 +3180,8 @@ fuse_rename(vnode_t *sdvp, char *oldname, vnode_t *tdvp, char *newname,
 				}
 				tvp = (struct vnode*)NULL;
 				mutex_enter(&sep->avl_mutx);
-				avl_remove(&(sep->avl_cache), renamep);
+				avl_remove(&(sep->avl_cache_i), renamep);
+				avl_remove(&(sep->avl_cache_n), renamep);
 				discarded_name = renamep->name;
 				discarded_namelen = renamep->namelen;
 				renamep->par_nodeid = VNODE_TO_NODEID(tdvp);
@@ -3209,7 +3189,8 @@ fuse_rename(vnode_t *sdvp, char *oldname, vnode_t *tdvp, char *newname,
 				renamep->name = wanted_name;
 				strlcpy(renamep->name, newname,
 							renamep->namelen);
-				avl_add(&(sep->avl_cache), renamep);
+				avl_add(&(sep->avl_cache_i), renamep);
+				avl_add(&(sep->avl_cache_n), renamep);
 				mutex_exit(&sep->avl_mutx);
 				kmem_free(discarded_name, discarded_namelen);
 			}
@@ -3444,7 +3425,7 @@ void fuse_destroy_cache(fuse_session_t *sep)
 	int failed;
 
 	mutex_enter(&sep->avl_mutx);
-	item = (fuse_avl_cache_node_t*)avl_first(&(sep->avl_cache));
+	item = (fuse_avl_cache_node_t*)avl_first(&(sep->avl_cache_i));
 	mutex_exit(&sep->avl_mutx);
 	failed = 0;
 	if (item)
@@ -3480,7 +3461,7 @@ void fuse_destroy_cache(fuse_session_t *sep)
 	 				vn_free(vp);
 				mutex_enter(&sep->avl_mutx);
 				item = (fuse_avl_cache_node_t*)
-						avl_first(&(sep->avl_cache));
+						avl_first(&(sep->avl_cache_i));
 				mutex_exit(&sep->avl_mutx);
 			} else
 				failed = 1;
@@ -4137,9 +4118,10 @@ fuse_vnode_cache_remove(struct vnode *vp, fuse_session_t *sep)
 
 	discard.facn_nodeid = VNODE_TO_NODEID(vp);
 	mutex_enter(&sep->avl_mutx);
-	if ((removep = avl_find(& (sep->avl_cache), &discard, &where))
+	if ((removep = avl_find(& (sep->avl_cache_i), &discard, &where))
 	    != NULL) {
-		avl_remove(&(sep->avl_cache), removep);
+		avl_remove(&(sep->avl_cache_i), removep);
+		avl_remove(&(sep->avl_cache_n), removep);
 		mutex_exit(&sep->avl_mutx);
 		fuse_avl_cache_node_destroy(removep);
 	} else
@@ -4199,7 +4181,7 @@ fuse_inactive(struct vnode *vp, struct cred *credp, caller_context_t *ct)
 
 		find.facn_nodeid = VNODE_TO_NODEID(vp);
 		mutex_enter(&sep->avl_mutx);
-		closep = avl_find(&(sep->avl_cache), &find, NULL);
+		closep = avl_find(&(sep->avl_cache_i), &find, NULL);
 		mutex_exit(&sep->avl_mutx);
 		if (closep && !closep->namelen) {
 			fuse_vnode_free(vp, sep);
