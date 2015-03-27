@@ -69,9 +69,9 @@ _init(void)
 {
 	int rv;
 
-	cmn_err(CE_CONT,"Fuse kernel %s interface %d.%d\n", FUSE_SOLARIS_VERSION,
+	cmn_err(CE_CONT,"!Fuse kernel %s interface %d.%d\n", FUSE_SOLARIS_VERSION,
 		FUSE_KERNEL_VERSION, FUSE_KERNEL_MINOR_VERSION);
-	cmn_err(CE_CONT,"Fuse kernel init at 0x%lx, vfs_modldrv at 0x%lx\n",
+	cmn_err(CE_CONT,"!Fuse kernel init at 0x%lx, vfs_modldrv at 0x%lx\n",
 		(long)_init,(long)&fuse_vfs_modldrv);
 	fuse_global_init();
 	if ((rv = mod_install(&ml)) != 0) {
