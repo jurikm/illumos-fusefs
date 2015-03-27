@@ -109,7 +109,7 @@ static int fuse_symlink(vnode_t *dvp, char *name, vattr_t *vap, char *link,
     cred_t *cr, caller_context_t *ct, int flags);
 static int fuse_readlink(vnode_t *vp, uio_t *uio, cred_t *cr,
     caller_context_t *ct);
-static int fuse_mkfifo(struct vnode *dvp, char *nm, struct vattr *vap,
+static int fuse_mknod(struct vnode *dvp, char *nm, struct vattr *vap,
     vcexcl_t excl, int mode, struct vnode **vpp, struct cred *cred,
     int flag, caller_context_t *ct, vsecattr_t *vsecp);
 static int fuse_space(vnode_t *vp, int cmd, struct flock64 *bfp, int flag,
@@ -742,18 +742,26 @@ static int fuse_open(struct vnode **vpp, int flag, struct cred *cred_p,
 	int err = 0;
 
 	/* Bounce the openings of special devices */
-	if (vp && (vp->v_type == VFIFO)) {
+	if (vp) {
 		vnode_t	*svp;
 
-		svp = specvp(vp, vp->v_rdev, vp->v_type, cred_p);
-		VN_RELE(vp);
-		if (svp == NULL)
-			err = ENOSYS;
-		else
-			*vpp = svp;
-		if (!err)
-			err = VOP_OPEN(vpp, flag, cred_p, ct);
-		return (err);
+		switch (vp->v_type) {
+		case VBLK :
+		case VCHR :
+		case VFIFO :
+		case VSOCK :
+			svp = specvp(vp, vp->v_rdev, vp->v_type, cred_p);
+			VN_RELE(vp);
+			if (svp == NULL)
+				err = ENOSYS;
+			else
+				*vpp = svp;
+			if (!err)
+				err = VOP_OPEN(vpp, flag, cred_p, ct);
+			return (err);
+		default :
+			break;
+		}
 	}
 
 	/*
@@ -1537,8 +1545,13 @@ static void fuse_set_getattr(struct vnode *vp, struct vattr *vap,
 	vap->va_type = vp->v_type;
 	/* return the file system ino, not the fuse internal nodeid */
 	vap->va_nodeid = attr->ino;
-
-	vap->va_rdev = vp->v_rdev;
+#ifdef _LP64
+	/* Unpack attr->rdev, received as 32 bits */
+	vap->va_rdev = makedevice((attr->rdev >> 18) & 0x3ffff,
+			attr->rdev & 0x3fff);
+#else
+	vap->va_rdev = attr->rdev;
+#endif
 	vap->va_blksize = vp->v_vfsp->vfs_bsize;
 
 	vap->va_nblocks = attr->blocks;
@@ -2365,10 +2378,11 @@ fuse_lookup_i(struct vnode *dvp, char *nm, struct vnode **vpp, cred_t *credp)
 				 * Moreover the avl_tree should be kept
 				 * in sync with the vnodes in use.
 		 		 */
-				if (((*vpp)->v_type != VFIFO)
-				    && IS_DEVVP(*vpp)) {
+				switch ((*vpp)->v_type) {
 					vnode_t	*svp;
 
+				case VBLK :
+				case VCHR :
 					svp = specvp(*vpp, (*vpp)->v_rdev,
 					    (*vpp)->v_type, credp);
 					VN_RELE(*vpp);
@@ -2590,16 +2604,20 @@ fuse_create(struct vnode *dvp, char *nm, struct vattr *vap, vcexcl_t excl,
 			return (EEXIST);
 	}
 
-	if (vap->va_type == VDIR) {
+	switch (vap->va_type) {
+	case VDIR :
 		return (VOP_MKDIR(dvp, nm, vap, vpp, cred_p, ct, 0, va));
-	}
 
-	if (vap->va_type == VFIFO) {
-		return (fuse_mkfifo(dvp, nm, vap, excl, mode, vpp, cred_p,
+	case VFIFO :
+	case VCHR :
+	case VBLK :
+	case VSOCK :
+		return (fuse_mknod(dvp, nm, vap, excl, mode, vpp, cred_p,
 				flag, ct, va));
-	}
+	case VREG :
+		break;
 
-	if (vap->va_type != VREG) {
+	default :
 		DTRACE_PROBE2(fuse_create_err_invalid_type,
 		    char *, "Invalid file type",
 		    struct vattr *, vap);
@@ -3606,12 +3624,12 @@ out:
 }
 
 /*
- * Create a FIFO
+ * Create a special file (BLK, CHR, FIFO, SOCK)
  *
  */
 /* ARGSUSED */
 static int
-fuse_mkfifo(struct vnode *dvp, char *name, struct vattr *vap, vcexcl_t excl,
+fuse_mknod(struct vnode *dvp, char *name, struct vattr *vap, vcexcl_t excl,
     int mode, struct vnode **vpp, struct cred *credp, int flag,
     caller_context_t *ct, vsecattr_t *va)
 {
@@ -3633,8 +3651,45 @@ fuse_mkfifo(struct vnode *dvp, char *name, struct vattr *vap, vcexcl_t excl,
 	    VNODE_TO_NODEID(dvp), credp, FUSE_GET_UNIQUE(sep));
 
 	fmni = (struct fuse_mknod_in*)msgp->ipdata.indata;
-	fmni->mode = (vap->va_mode & ~S_IFMT) | S_IFIFO;
-	fmni->rdev = 0;
+	switch (vap->va_type) {
+	case VBLK :
+		fmni->mode = (vap->va_mode & ~S_IFMT) | S_IFBLK;
+#ifdef _LP64
+		/* Must pack the device the old way to fit into fmni->rdev */
+		if (((unsigned int)getmajor(vap->va_rdev) > 0x3fff)
+		    || ((unsigned int)getminor(vap->va_rdev) > 0x3ffff))
+			return (EINVAL);
+		fmni->rdev = ((getmajor(vap->va_rdev) & 0x3fff) << 18)
+				| (getminor(vap->va_rdev) & 0x3ffff);
+#else
+		fmni->rdev = vap->va_rdev;
+#endif
+		break;
+	case VCHR :
+		fmni->mode = (vap->va_mode & ~S_IFMT) | S_IFCHR;
+#ifdef _LP64
+		/* Must pack the device the old way to fit into fmni->rdev */
+		if (((unsigned int)getmajor(vap->va_rdev) > 0x3fff)
+		    || ((unsigned int)getminor(vap->va_rdev) > 0x3ffff))
+			return (EINVAL);
+		fmni->rdev = ((getmajor(vap->va_rdev) & 0x3fff) << 18)
+				| (getminor(vap->va_rdev) & 0x3ffff);
+#else
+		fmni->rdev = vap->va_rdev;
+#endif
+		break;
+	case VFIFO :
+		fmni->mode = (vap->va_mode & ~S_IFMT) | S_IFIFO;
+		fmni->rdev = 0;
+		break;
+	case VSOCK :
+		fmni->mode = (vap->va_mode & ~S_IFMT) | S_IFSOCK;
+		fmni->rdev = 0;
+		break;
+	default :
+		return (ENODEV);
+		break;
+	}
 	/* Set up arguments to the fuse library */
 	memcpy((char*)msgp->ipdata.indata + sizeof(*fmni), name, namelen - 1);
 	((char *)msgp->ipdata.indata)[sizeof(*fmni) + namelen - 1] = '\0';
@@ -3651,7 +3706,8 @@ fuse_mkfifo(struct vnode *dvp, char *name, struct vattr *vap, vcexcl_t excl,
 		goto cleanup;
 	}
 
-	err = fuse_add_entry(vpp, dvp, msgp, sep, name, namelen, credp, VFIFO);
+	err = fuse_add_entry(vpp, dvp, msgp, sep, name, namelen,
+				credp, vap->va_type);
 
 cleanup:
 	fuse_free_msg(msgp);
