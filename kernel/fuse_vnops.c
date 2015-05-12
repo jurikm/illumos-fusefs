@@ -3215,6 +3215,7 @@ fuse_rename(vnode_t *sdvp, char *oldname, vnode_t *tdvp, char *newname,
 				discarded_name = renamep->name;
 				discarded_namelen = renamep->namelen;
 				renamep->par_nodeid = VNODE_TO_NODEID(tdvp);
+				VTOFD(svp)->par_nid = renamep->par_nodeid;
 				renamep->namelen = strlen(newname) + 1;
 				renamep->name = wanted_name;
 				strlcpy(renamep->name, newname,
