@@ -3112,6 +3112,12 @@ fuse_rename(vnode_t *sdvp, char *oldname, vnode_t *tdvp, char *newname,
 	if (err)
 		return (err);
 
+	if (!svp || !svp->v_data) {
+		cmn_err(CE_CONT,"Abnormal condition in fuse_rename"
+			" oldname %s newname %s\n",oldname,newname);
+		return (EIO);
+	}
+
 	/*
 	 * Make sure we can delete the old (source) entry.  This
 	 * requires write permission on the containing directory.  If
