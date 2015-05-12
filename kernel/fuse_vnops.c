@@ -1024,6 +1024,12 @@ again:
 			goto again;
 		}
 
+		if (!vp->v_data) {
+			cmn_err(CE_CONT,"Abnormal condition in fuse_getapage"
+				" off 0x%lx len %ld\n", (long)off,(long)len);
+			err = EIO;
+			goto cleanup;
+		}
 		DTRACE_PROBE2(fuse_getapage_info_create,
 		    char *, "page_create_va successful",
 		    struct page *, pp);
