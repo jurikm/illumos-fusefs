@@ -26,7 +26,7 @@
  * Copyright 2009 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  *
- * Portions Copyright 2012-2013 Jean-Pierre Andre
+ * Portions Copyright 2012-2015 Jean-Pierre Andre
  */
 /*
  * This file has been derived from OpenSolaris devfs and others in uts/common/fs
