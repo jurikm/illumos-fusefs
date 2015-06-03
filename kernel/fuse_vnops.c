@@ -2162,7 +2162,7 @@ static int fuse_lookup(struct vnode *dvp, char *nm, struct vnode **vpp,
 	}
 
 	if ((VTOFD(dvp))->nodeid == FUSE_ROOT_ID) {
-		if (err = fuse_access(dvp, VEXEC, flags, credp, ct)) {
+		if (err = fuse_access_inkernelcheck(dvp, VEXEC, credp)) {
 			DTRACE_PROBE2(fuse_lookup_err_access,
 			    char *, "fuse_access failed",
 			    struct vnode *, dvp);
