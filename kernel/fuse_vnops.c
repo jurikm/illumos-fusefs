@@ -1644,6 +1644,9 @@ fuse_getattr(struct vnode *vp, struct vattr *vap, int flags, cred_t *credp,
 	gethrestime(&ts);
 	if (ATTR_CACHE_VALID(ts, VTOFD(vp)->cached_attrs_bound)) {
 		(void) memcpy(vap, &(VTOFD(vp)->cached_attrs), sizeof (*vap));
+		/* File may have been written to since attrs were cached */
+		if (VTOFD(vp)->file_size_status & FSIZE_UPDATED)
+			vap->va_size = VTOFD(vp)->fsize;
 		DTRACE_PROBE2(fuse_getattr_info_cached,
 		    char *, "Using cached attributes", struct vnode *, vp);
 		return (0);
