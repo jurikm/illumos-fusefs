@@ -1854,6 +1854,12 @@ fuse_setattr(
 	}
 #ifndef DONT_CACHE_ATTRIBUTES
 	cache_attrs(vp, (struct fuse_attr_out *)msgp->opdata.outdata);
+	/* The cache is valid, but permissions to lookup have to be rechecked */
+	if ((vp->v_type == VDIR)
+	    && (mask & (AT_MODE | AT_UID | AT_GID))) {
+		VTOFD(vp)->uid = (uid_t)-1;
+		VTOFD(vp)->gid = (gid_t)-1;
+	}
 #endif
 
 cleanup:
@@ -2357,7 +2363,47 @@ fuse_lookup_i(struct vnode *dvp, char *nm, struct vnode **vpp, cred_t *credp)
 		    char *, "name too long", char *, nm);
 		return (ENAMETOOLONG);
 	}
+#ifndef DONT_CACHE_ATTRIBUTES
+	/*
+	 * Check whether the node is available in the cache.
+	 * If ownership or permissions of parent directory has been
+	 * changed, or caller is not the one for which lookup has been
+	 * checked last, we must call the daemon in order to check
+	 * whether lookup is allowed, even when the parent cache is valid.
+	 */
+	if ((VTOFD(dvp)->uid == crgetuid(credp))
+	    && (VTOFD(dvp)->gid == crgetgid(credp))) {
+		err = fuse_getvnode(FUSE_NULL_ID, vpp, VNODE_CACHED,
+			    0, sep, dvp->v_vfsp, nmlen, nm,
+			    VNODE_TO_NODEID(dvp), credp);
+		if (!err && *vpp && VTOFD(*vpp)) {
+			timestruc_t ts;
 
+			/*
+			 * Make sure the cached inode is valid, which
+			 * implies it is still recorded in the same parent
+			 * directories.
+			 */
+			gethrestime(&ts);
+			if (ATTR_CACHE_VALID(ts, VTOFD(*vpp)->cached_attrs_bound)) {
+				switch ((*vpp)->v_type) {
+					vnode_t	*svp;
+
+				case VBLK :
+				case VCHR :
+					svp = specvp(*vpp, (*vpp)->v_rdev,
+					    (*vpp)->v_type, credp);
+					VN_RELE(*vpp);
+					if (svp == NULL)
+						err = ENOSYS;
+					else
+						*vpp = svp;
+				}
+				return (err);
+			}
+		}
+	}
+#endif
 	/* Need to send a FUSE_LOOKUP message to the fuse library */
 	msgp = fuse_setup_message(nmlen, FUSE_LOOKUP, VNODE_TO_NODEID(dvp),
 	    credp, FUSE_GET_UNIQUE(sep));
@@ -2393,6 +2439,8 @@ fuse_lookup_i(struct vnode *dvp, char *nm, struct vnode **vpp, cred_t *credp)
 			} else {
 #ifndef DONT_CACHE_ATTRIBUTES
 				cache_attrs((*vpp), feo);
+				VTOFD(dvp)->uid = crgetuid(credp);
+				VTOFD(dvp)->gid = crgetgid(credp);
 #endif
 
 				/*

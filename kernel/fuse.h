@@ -117,6 +117,8 @@ typedef struct fuse_vnode_data {
 #ifndef DONT_CACHE_ATTRIBUTES
 	struct vattr cached_attrs;
 	struct timespec cached_attrs_bound;
+	uid_t uid;	/* most recent user which looked up the directory */
+	gid_t gid;	/* most recent user which looked up the directory */
 #endif
 	size_t fsize;	/* temp place holder when file size gets modified */
 	int file_size_status; /* indicates if cached file size is valid */
