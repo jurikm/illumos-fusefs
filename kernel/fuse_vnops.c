@@ -862,7 +862,7 @@ static int fuse_discard_name(struct vnode *vp, fuse_session_t *sep)
 			avl_remove(&(sep->avl_cache_i), unnamep);
 			avl_remove(&(sep->avl_cache_n), unnamep);
 			unnamep->name = "";
-			unnamep->namelen = 0;
+			unnamep->namelen = 1;
 			avl_add(&(sep->avl_cache_i), unnamep);
 			avl_add(&(sep->avl_cache_n), unnamep);
 			mutex_exit(&sep->avl_mutx);

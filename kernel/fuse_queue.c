@@ -315,7 +315,7 @@ fuse_avl_cache_node_create(vnode_t *np, uint64_t nodeid, uint64_t par_nodeid,
 	nod->facn_nodeid = nodeid;
 	nod->par_nodeid = par_nodeid;
 
-	if (namelen) {
+	if (namelen > 1) {
 		nod->namelen = namelen;
 		nod->name = kmem_alloc(namelen, KM_SLEEP);
 		(void) strlcpy(nod->name, name, namelen);
@@ -326,7 +326,7 @@ fuse_avl_cache_node_create(vnode_t *np, uint64_t nodeid, uint64_t par_nodeid,
 void
 fuse_avl_cache_node_destroy(fuse_avl_cache_node_t *node)
 {
-	if (node->namelen)
+	if (node->namelen > 1)
 		kmem_free(node->name, node->namelen);
 	kmem_free(node, sizeof (fuse_avl_cache_node_t));
 }
