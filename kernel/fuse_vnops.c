@@ -3042,6 +3042,9 @@ fuse_rename_i(struct vnode *sdvp, char *oldname, struct vnode *tdvp,
 	int err = 0;
 	int old_namelen = strlen(oldname) + 1;
 	int new_namelen = strlen(newname) + 1;
+#ifndef DONT_CACHE_ATTRIBUTES
+	fuse_avl_cache_node_t tofind, *foundp;
+#endif
 
 	if (old_namelen > MAXNAMELEN || new_namelen > MAXNAMELEN)
 		return (ENAMETOOLONG);
@@ -3054,6 +3057,19 @@ fuse_rename_i(struct vnode *sdvp, char *oldname, struct vnode *tdvp,
 		return (ENODEV);
 	}
 
+#ifndef DONT_CACHE_ATTRIBUTES
+	/* Invalidate cached attributes if any found */
+	tofind.facn_nodeid = FUSE_NULL_ID;
+	tofind.namelen = old_namelen;
+	tofind.name = oldname;
+	tofind.par_nodeid = VNODE_TO_NODEID(sdvp);
+	mutex_enter(&sep->avl_mutx);
+	foundp = avl_find(&(sep->avl_cache_n), &tofind, NULL);
+	mutex_exit(&sep->avl_mutx);
+	if (foundp) {
+		invalidate_cached_attrs(foundp->facn_vnode_p);
+	}
+#endif
 	msgp = fuse_setup_message((sizeof (*fri) + old_namelen + new_namelen),
 	    FUSE_RENAME, VNODE_TO_NODEID(sdvp), credp, FUSE_GET_UNIQUE(sep));
 
@@ -3073,6 +3089,12 @@ fuse_rename_i(struct vnode *sdvp, char *oldname, struct vnode *tdvp,
 			DTRACE_PROBE2(fuse_rename_err,
 				char *, "FUSE_RENAME request failed",
 				struct fuse_out_header *, msgp->opdata.fouth);
+#ifndef DONT_CACHE_ATTRIBUTES
+		} else {
+			/* On success, the parent directories have changed */
+			invalidate_cached_attrs(sdvp);
+			invalidate_cached_attrs(tdvp);
+#endif
 		}
 	}
 	fuse_free_msg(msgp);
@@ -3394,6 +3416,11 @@ fuse_remove(vnode_t *dvp, char *name, cred_t *credp, caller_context_t *ct,
 			struct fuse_out_header *, msgp->opdata.fouth);
 		goto cleanup;
 	}
+
+#ifndef DONT_CACHE_ATTRIBUTES
+	/* On success, the parent directory has changed */
+	invalidate_cached_attrs(dvp);
+#endif
 
 	if (seen_err) {
 		err = seen_err;
