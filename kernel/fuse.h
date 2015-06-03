@@ -120,7 +120,7 @@ typedef struct fuse_vnode_data {
 	uid_t uid;	/* most recent user which looked up the directory */
 	gid_t gid;	/* most recent user which looked up the directory */
 #endif
-	size_t fsize;	/* temp place holder when file size gets modified */
+	uint64_t fsize;	/* temp place holder when file size gets modified */
 	int file_size_status; /* indicates if cached file size is valid */
 	offset_t offset; /* offset of (single) unsent page */
 
