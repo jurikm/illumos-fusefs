@@ -215,9 +215,9 @@ const fs_operation_def_t temp_vnodeops_template[] = {
 _NOTE(CONSTCOND) } while (0)
 
 #define	ATTR_CACHE_VALID(curtime, attrtime)				\
-	(curtime.tv_sec == attrtime.tv_sec) ?				\
+	((curtime.tv_sec == attrtime.tv_sec) ?				\
 	    (curtime.tv_nsec <= attrtime.tv_nsec) :			\
-	    (curtime.tv_sec <= attrtime.tv_sec)
+	    (curtime.tv_sec <= attrtime.tv_sec))
 
 #define	invalidate_cached_attrs(vp)					\
 	if (VTOFD(vp))							\
@@ -1532,12 +1532,16 @@ fuse_write(struct vnode *vp, struct uio *uiop, int ioflag,
 static void fuse_set_getattr(struct vnode *vp, struct vattr *vap,
     struct fuse_attr *attr)
 {
+	fuse_vnode_data_t *v_data = VTOFD(vp);
+
 	vap->va_mode = attr->mode & MODEMASK;
 		/* return cached size if some data were not flushed */
-	if (vp->v_data && (VTOFD(vp)->file_size_status & FSIZE_UPDATED))
-		vap->va_size = VTOFD(vp)->fsize;
-	else
+	if (v_data->file_size_status & FSIZE_UPDATED)
+		vap->va_size = v_data->fsize;
+	else {
 		vap->va_size = attr->size;
+		v_data->file_size_status &= ~FSIZE_NOT_RELIABLE;
+	}
 	vap->va_atime.tv_sec = attr->atime;
 	vap->va_atime.tv_nsec = attr->atimensec;
 	vap->va_mtime.tv_sec = attr->mtime;
@@ -1645,15 +1649,18 @@ fuse_getattr(struct vnode *vp, struct vattr *vap, int flags, cred_t *credp,
 	fuse_msg_node_t *msgp = NULL;
 #ifndef DONT_CACHE_ATTRIBUTES
 	timestruc_t ts;
+	fuse_vnode_data_t *v_data = VTOFD(vp);
 #endif
 
 #ifndef DONT_CACHE_ATTRIBUTES
 	gethrestime(&ts);
-	if (ATTR_CACHE_VALID(ts, VTOFD(vp)->cached_attrs_bound)) {
-		(void) memcpy(vap, &(VTOFD(vp)->cached_attrs), sizeof (*vap));
+
+	if (!(v_data->file_size_status & FSIZE_NOT_RELIABLE)
+	    && ATTR_CACHE_VALID(ts, v_data->cached_attrs_bound)) {
+		(void) memcpy(vap, &v_data->cached_attrs, sizeof (*vap));
 		/* File may have been written to since attrs were cached */
-		if (VTOFD(vp)->file_size_status & FSIZE_UPDATED)
-			vap->va_size = VTOFD(vp)->fsize;
+		if (v_data->file_size_status & FSIZE_UPDATED)
+			vap->va_size = v_data->fsize;
 		DTRACE_PROBE2(fuse_getattr_info_cached,
 		    char *, "Using cached attributes", struct vnode *, vp);
 		return (0);
@@ -3781,7 +3788,8 @@ fuse_getfilesize(struct vnode *vp, u_offset_t *fsize, struct cred *credp)
 	 */
 	timestruc_t ts;
 	gethrestime(&ts);
-	if (ATTR_CACHE_VALID(ts, VTOFD(vp)->cached_attrs_bound)) {
+	if (!(VTOFD(vp)->file_size_status & FSIZE_NOT_RELIABLE)
+	    && ATTR_CACHE_VALID(ts, VTOFD(vp)->cached_attrs_bound)) {
 		*fsize = VTOFD(vp)->cached_attrs.va_size;
 		DTRACE_PROBE2(fuse_getfilesize_info_attr_cache,
 		    char *, "returning file size from attr cache",
