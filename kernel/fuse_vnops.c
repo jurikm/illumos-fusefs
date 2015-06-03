@@ -451,23 +451,25 @@ resp_intrprt:
 
 	/* Check if there will be a collision? */
 	tofind.facn_nodeid = feo->nodeid;
-	mutex_enter(&sep->avl_mutx);
-	foundp = avl_find(&(sep->avl_cache_i), &tofind, &where);
-	mutex_exit(&sep->avl_mutx);
-	if (foundp) {
-		DTRACE_PROBE2(create_filehandle_err_collision,
-		    char *, "Node already in cache",
-		    struct fuse_entry_out *, feo);
-		/*
-		 * We have the unhappy situation of forcing a purge on the
-		 * existing vnode
-		 */
-		fuse_vnode_destroy(foundp->facn_vnode_p, credp, sep);
-	}
+	do {
+		mutex_enter(&sep->avl_mutx);
+		foundp = avl_find(&(sep->avl_cache_i), &tofind, &where);
+		if (foundp) {
+			mutex_exit(&sep->avl_mutx);
+			DTRACE_PROBE2(create_filehandle_err_collision,
+			    char *, "Node already in cache",
+			    struct fuse_entry_out *, feo);
+			/*
+			 * We have the unhappy situation of forcing a purge
+			 * on the existing vnode.
+			 * Better have avl_mutx released, so have to retry.
+			 */
+			fuse_vnode_destroy(foundp->facn_vnode_p, credp, sep);
+		}
+	} while (foundp);
 	/* Add the vnode to the avl tree */
 	cache_nodep = fuse_avl_cache_node_create(vp, feo->nodeid,
 	    fvdata->fcd->par_nodeid, fvdata->fcd->namelen, fvdata->fcd->name);
-	mutex_enter(&sep->avl_mutx);
 	avl_add(&(sep->avl_cache_i), cache_nodep);
 	avl_add(&(sep->avl_cache_n), cache_nodep);
 	mutex_exit(&sep->avl_mutx);
@@ -2270,37 +2272,43 @@ fuse_getvnode(uint64_t nodeid, struct vnode **vpp, v_getmode vmode,
 {
 	fuse_avl_cache_node_t tofind, *foundp;
 	fuse_avl_cache_node_t *avl_nodep;
-	int create_new = 0;
+	int create_new;
 
 	tofind.facn_nodeid = nodeid;
 	tofind.namelen = namelen;
 	tofind.name = name;
 	tofind.par_nodeid = parent_nid;
-	mutex_enter(&sep->avl_mutx);
-	if (nodeid == FUSE_NULL_ID)
-		foundp = avl_find(&(sep->avl_cache_n), &tofind, NULL);
-	else
-		foundp = avl_find(&(sep->avl_cache_i), &tofind, NULL);
-	mutex_exit(&sep->avl_mutx);
-	if (foundp) {
-		*vpp = foundp->facn_vnode_p;
-		ASSERT(*vpp);
-		/*
-		 * If we need a new vnode, then try to destroy the previously
-		 * cached vnode
-		 */
-		if (vmode == VNODE_NEW) {
-			(void) fuse_vnode_destroy(*vpp, credp, sep);
-			create_new = 1;
-		} else {
-			VN_HOLD(*vpp);
+	do {
+		create_new = 0;
+		mutex_enter(&sep->avl_mutx);
+		if (nodeid == FUSE_NULL_ID)
+			foundp = avl_find(&(sep->avl_cache_n), &tofind, NULL);
+		else
+			foundp = avl_find(&(sep->avl_cache_i), &tofind, NULL);
+		if (foundp) {
+			*vpp = foundp->facn_vnode_p;
+			ASSERT(*vpp);
+			/*
+			 * If we need a new vnode, then try to destroy the
+			 * previously cached vnode.
+			 * Release the mutex for destroying and retry.
+			 */
+			mutex_exit(&sep->avl_mutx);
+			if (vmode == VNODE_NEW) {
+				fuse_vnode_destroy(*vpp, credp, sep);
+				create_new = 1;
+			} else {
+				VN_HOLD(*vpp);
+			}
 		}
-	} else {
+	} while (create_new);
+	if (!foundp) {
 		/*
 		 * If the caller was looking for the previously cached vnode
 		 * then return an error since we din't find it in the AVL tree
 		 */
 		if (vmode == VNODE_CACHED) {
+			mutex_exit(&sep->avl_mutx);
 			return (ENOENT);
 		}
 		/*
@@ -2309,12 +2317,12 @@ fuse_getvnode(uint64_t nodeid, struct vnode **vpp, v_getmode vmode,
 		create_new = 1;
 	}
 	if (create_new) {
+		/* The mutex is still held, avl_find/avl_add must be atomic */
 		*vpp = fuse_create_vnode(vfsp, nodeid, parent_nid,
 		    mode, OTHER_OP);
 
 		avl_nodep = fuse_avl_cache_node_create(
 		    *vpp, nodeid, parent_nid, namelen, name);
-		mutex_enter(&sep->avl_mutx);
 		avl_add(&(sep->avl_cache_i), avl_nodep);
 		avl_add(&(sep->avl_cache_n), avl_nodep);
 		mutex_exit(&sep->avl_mutx);
