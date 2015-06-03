@@ -204,12 +204,14 @@ const fs_operation_def_t temp_vnodeops_template[] = {
 
 #define	cache_attrs(vp, fuse_out) do {					\
 	timestruc_t ts;							\
+	fuse_vnode_data_t *v_data = VTOFD(vp);				\
 									\
-	VTOFD(vp)->cached_attrs_bound.tv_sec = (fuse_out)->attr_valid;	\
-	VTOFD(vp)->cached_attrs_bound.tv_nsec = (fuse_out)->attr_valid_nsec; \
+	v_data->cached_attrs_bound.tv_sec = (fuse_out)->attr_valid;	\
+	v_data->cached_attrs_bound.tv_nsec = (fuse_out)->attr_valid_nsec; \
 	gethrestime(&ts);						\
-	timespecadd(&VTOFD(vp)->cached_attrs_bound, &ts);		\
-	fuse_set_getattr(vp, &(VTOFD(vp)->cached_attrs), &(fuse_out)->attr); \
+	if ((vp->v_type == VDIR) || ((fuse_out)->attr.nlink < 2))	\
+		timespecadd(&v_data->cached_attrs_bound, &ts);		\
+	fuse_set_getattr(vp, &v_data->cached_attrs, &(fuse_out)->attr); \
 _NOTE(CONSTCOND) } while (0)
 
 #define	ATTR_CACHE_VALID(curtime, attrtime)				\
