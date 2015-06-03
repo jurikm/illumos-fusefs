@@ -1611,8 +1611,13 @@ fuse_getattr_from_daemon(struct vnode *vp, struct vattr *vap,
 		err = EINVAL;
 		goto out;
 	}
+#ifndef DONT_CACHE_ATTRIBUTES
+	cache_attrs(vp, (struct fuse_attr_out *)(msgp->opdata.outdata));
+	memcpy(vap, &(VTOFD(vp)->cached_attrs), sizeof(*vap));
+#else
 	fuse_set_getattr(vp, vap,
 	    &((struct fuse_attr_out *)msgp->opdata.outdata)->attr);
+#endif
 
 	if (msgpp) {
 		/* It's caller's responsibility to free the msg node */
@@ -1656,10 +1661,6 @@ fuse_getattr(struct vnode *vp, struct vattr *vap, int flags, cred_t *credp,
 
 	if (err)
 		return (err);
-
-#ifndef DONT_CACHE_ATTRIBUTES
-	cache_attrs(vp, (struct fuse_attr_out *)(msgp->opdata.outdata));
-#endif
 
 out:
 	fuse_free_msg(msgp);
@@ -3792,9 +3793,6 @@ fuse_getfilesize(struct vnode *vp, u_offset_t *fsize, struct cred *credp)
 	if (err)
 		return (err);
 
-#ifndef DONT_CACHE_ATTRIBUTES
-	cache_attrs(vp, (struct fuse_attr_out *)(msgp->opdata.outdata));
-#endif
 	*fsize = va.va_size;
 	DTRACE_PROBE2(fuse_getfilesize_info_daemon,
 	    char *, "returning file size from daemon",
