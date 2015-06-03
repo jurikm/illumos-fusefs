@@ -61,6 +61,7 @@ typedef struct fuse_session
 	uint32_t	max_write;  /* Max Write value set by fuse lib */
 	vfs_t		*vfs;
 	uint32_t	mounted:1;
+	uint32_t	readonly:1;
 } fuse_session_t;
 
 

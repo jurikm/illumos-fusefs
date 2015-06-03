@@ -202,14 +202,20 @@ const fs_operation_def_t temp_vnodeops_template[] = {
 	NULL, 		NULL
 };
 
-#define	cache_attrs(vp, fuse_out) do {					\
+/*
+ *	Hard-linked files are not cached because the high-level
+ *	fuse library assigns multiple nodeid to them, leading to
+ *	multiple cache entries for the same file.
+ */
+#define	cache_attrs(sep, vp, fuse_out) do {				\
 	timestruc_t ts;							\
 	fuse_vnode_data_t *v_data = VTOFD(vp);				\
 									\
 	v_data->cached_attrs_bound.tv_sec = (fuse_out)->attr_valid;	\
 	v_data->cached_attrs_bound.tv_nsec = (fuse_out)->attr_valid_nsec; \
 	gethrestime(&ts);						\
-	if ((vp->v_type == VDIR) || ((fuse_out)->attr.nlink < 2))	\
+	if (((fuse_out)->attr.nlink < 2)				\
+	    || (vp->v_type == VDIR) || sep->readonly)			\
 		timespecadd(&v_data->cached_attrs_bound, &ts);		\
 	fuse_set_getattr(vp, &v_data->cached_attrs, &(fuse_out)->attr); \
 _NOTE(CONSTCOND) } while (0)
@@ -483,7 +489,7 @@ resp_intrprt:
 	fvdata->nlookup++;
 	vn_setops(vp, dv_vnodeops);
 #ifndef DONT_CACHE_ATTRIBUTES
-	cache_attrs(vp, feo);
+	cache_attrs(sep, vp, feo);
 #endif
 
 	/*
@@ -1620,7 +1626,7 @@ fuse_getattr_from_daemon(struct vnode *vp, struct vattr *vap,
 		goto out;
 	}
 #ifndef DONT_CACHE_ATTRIBUTES
-	cache_attrs(vp, (struct fuse_attr_out *)(msgp->opdata.outdata));
+	cache_attrs(sep, vp, (struct fuse_attr_out *)(msgp->opdata.outdata));
 	memcpy(vap, &(VTOFD(vp)->cached_attrs), sizeof(*vap));
 #else
 	fuse_set_getattr(vp, vap,
@@ -1853,7 +1859,7 @@ fuse_setattr(
 		}
 	}
 #ifndef DONT_CACHE_ATTRIBUTES
-	cache_attrs(vp, (struct fuse_attr_out *)msgp->opdata.outdata);
+	cache_attrs(sep, vp, (struct fuse_attr_out *)msgp->opdata.outdata);
 	/* The cache is valid, but permissions to lookup have to be rechecked */
 	if ((vp->v_type == VDIR)
 	    && (mask & (AT_MODE | AT_UID | AT_GID))) {
@@ -2438,7 +2444,7 @@ fuse_lookup_i(struct vnode *dvp, char *nm, struct vnode **vpp, cred_t *credp)
 				fuse_send_forget(nodeid, sep, 1);
 			} else {
 #ifndef DONT_CACHE_ATTRIBUTES
-				cache_attrs((*vpp), feo);
+				cache_attrs(sep, (*vpp), feo);
 				VTOFD(dvp)->uid = crgetuid(credp);
 				VTOFD(dvp)->gid = crgetgid(credp);
 #endif
@@ -4400,7 +4406,7 @@ fuse_add_entry(struct vnode **vpp, struct vnode *dvp, fuse_msg_node_t *msgp,
 	}
 #ifndef DONT_CACHE_ATTRIBUTES
 	invalidate_cached_attrs(dvp);
-	cache_attrs((*vpp), feo);
+	cache_attrs(sep, (*vpp), feo);
 #endif
 	return (err);
 }

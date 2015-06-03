@@ -134,6 +134,7 @@ fuse_init_session(fuse_session_t *se)
 	    sizeof (fuse_avl_cache_node_t),
 	    offsetof(struct fuse_avl_cache_node, facn_cache_node));
 	se->mounted = 0;
+	se->readonly = 0;
 }
 
 void

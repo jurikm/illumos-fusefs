@@ -394,6 +394,7 @@ fuse_mount(struct vfs *vfsp, struct vnode *mvp, struct mounta *uap,
 	fuse_session_set_cred(se, cr);
 	fuse_session_set_vfs(se, vfsp);
 	se->mounted = 1;
+	se->readonly = (uap->flags & MS_RDONLY ? 1 : 0);
 	err = fuse_send_mounted_notice(se);
 
 	return (err);
