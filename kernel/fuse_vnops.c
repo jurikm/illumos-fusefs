@@ -871,8 +871,8 @@ static int fuse_discard_name(struct vnode *vp, fuse_session_t *sep)
 			avl_remove(&(sep->avl_cache_n), unnamep);
 			unnamep->name = "";
 			unnamep->namelen = 1;
+			/* Do not insert into tree by name */
 			avl_add(&(sep->avl_cache_i), unnamep);
-			avl_add(&(sep->avl_cache_n), unnamep);
 			mutex_exit(&sep->avl_mutx);
 			kmem_free(oldname, oldnamelen);
 		} else
@@ -981,7 +981,7 @@ static int fuse_close(struct vnode *vp, int flags, int count,
 		mutex_enter(&sep->avl_mutx);
 		closep = avl_find(&(sep->avl_cache_i), &find, NULL);
 		mutex_exit(&sep->avl_mutx);
-		if (closep && !closep->namelen) {
+		if (closep && (closep->namelen < 2)) {
 			VN_RELE(vp);
 		}
 	}
@@ -4290,7 +4290,9 @@ fuse_vnode_cache_remove(struct vnode *vp, fuse_session_t *sep)
 	if ((removep = avl_find(& (sep->avl_cache_i), &discard, &where))
 	    != NULL) {
 		avl_remove(&(sep->avl_cache_i), removep);
-		avl_remove(&(sep->avl_cache_n), removep);
+		/* Files deleted while open are not recorded in tree by name */
+		if (removep->namelen > 1)
+			avl_remove(&(sep->avl_cache_n), removep);
 		mutex_exit(&sep->avl_mutx);
 		fuse_avl_cache_node_destroy(removep);
 	} else
@@ -4352,7 +4354,7 @@ fuse_inactive(struct vnode *vp, struct cred *credp, caller_context_t *ct)
 		mutex_enter(&sep->avl_mutx);
 		closep = avl_find(&(sep->avl_cache_i), &find, NULL);
 		mutex_exit(&sep->avl_mutx);
-		if (closep && !closep->namelen) {
+		if (closep && (closep->namelen < 2)) {
 			fuse_vnode_free(vp, sep);
 			deleted = 1;
 		}
