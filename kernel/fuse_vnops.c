@@ -2844,6 +2844,7 @@ fuse_cons_dir(struct uio *uiop, size_t reqsize, void *buf, size_t bufsize,
 		de = (struct dirent64 *)iovp->base;
 
 		de->d_ino = fudge->ino;
+		de->d_off = fudge->off;
 		de->d_reclen = bytesavail;
 		(void *) memcpy((char *)iovp->base + DENTRY64_NAME_OFFSET,
 		    (char *)buf + FUSE_NAME_OFFSET, fudge->namelen);
