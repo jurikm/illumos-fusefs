@@ -65,6 +65,8 @@
 #include "fuse_queue.h"
 #include "fuse.h"
 
+#define CHECK_VDATA O /* Optionally check consistency of v_data */
+
 /* Vnode operations */
 static int fuse_open(struct vnode **vpp, int flag, struct cred *cred,
     caller_context_t *ct);
@@ -355,6 +357,49 @@ checkentry(struct fuse_entry_out *feo, enum vtype vtyp)
 	return (0);
 }
 
+/*
+ *	Check availability and consistency of v_data
+ *	(meant for debugging)
+ */
+
+static fuse_vnode_data_t *check_vdata(struct vnode *vp, int line)
+{
+	fuse_avl_cache_node_t tofind, *foundp;
+	fuse_session_t *sep;
+	fuse_vnode_data_t *v_data;
+
+	v_data = vp->v_data;
+	if (v_data && (v_data->nodeid != FUSE_ROOT_ID)) {
+		sep = fuse_minor_get_session(getminor(vp->v_rdev));
+		mutex_enter(&sep->avl_mutx);
+		if (v_data->nodeid != FUSE_NULL_ID) {
+			/* the nodeid is recorded */
+			tofind.facn_nodeid = v_data->nodeid;
+			foundp = avl_find(&sep->avl_cache_i, &tofind, NULL);
+		} else {
+			/* search in full list, hopefully never needed */
+			foundp = avl_first(&sep->avl_cache_i);
+			while (foundp && (foundp->facn_vnode_p != vp))
+				foundp = AVL_NEXT(&sep->avl_cache_i, foundp);
+		}
+		mutex_exit(&sep->avl_mutx);
+		if (!foundp || (foundp->facn_vnode_p != vp)) {
+			cmn_err(CE_WARN,"Bad vnode record for nodeid %lld"
+				" at line %d\n",
+				(long long)v_data->nodeid, line);
+			v_data = (fuse_vnode_data_t*)NULL;
+		}
+	}
+	/* When v_data is null, caller is expected to log and take measures */
+	return (v_data);
+}
+
+#if CHECK_VDATA
+#define GET_VDATA(vp) check_vdata((vp), __LINE__)
+#else
+#define GET_VDATA(vp) ((vp)->v_data)
+#endif
+
 static void
 release_create_data(struct fuse_create_data *fcd)
 {
@@ -644,7 +689,7 @@ get_filehandle(struct vnode *vp, int flag, struct cred *credp,
 		}
 	}
 	if ((check_cache & CACHE_LIST_CHECK)) {
-		if (!VTOFD(vp)) {
+		if (!GET_VDATA(vp)) {
 			/*
 			 * Very bad : do not panic.
 			 */
@@ -916,7 +961,7 @@ static int fuse_close(struct vnode *vp, int flags, int count,
 	    FUSE_RELEASEDIR : FUSE_RELEASE;
 
 		/* First, send unsent data */
-	if (vp && vp->v_data) {
+	if (vp && GET_VDATA(vp)) {
 		err = flush_unsent_data(vp, credp, ct);
 		if (err)
 			return (err);
@@ -1034,7 +1079,7 @@ again:
 			goto again;
 		}
 
-		if (!vp->v_data) {
+		if (!GET_VDATA(vp)) {
 			cmn_err(CE_CONT,"Abnormal condition in fuse_getapage"
 				" off 0x%lx len %ld\n", (long)off,(long)len);
 			err = EIO;
@@ -1290,7 +1335,7 @@ wrfuse(struct vnode *vp, struct uio *uiop, int ioflag,
 		 * Maybe this is not needed (depends on the meaning
 		 * of offset in putpage()), anyway it is safer.
 		 */
-	vdata = (fuse_vnode_data_t*)vp->v_data;
+	vdata = GET_VDATA(vp);
 	if (vdata && (vdata->file_size_status & FSIZE_UNSENT)) {
 		if ((vdata->offset < (offset_t)(uiop->uio_loffset & PAGEMASK))
 		   || (vdata->offset
@@ -1308,7 +1353,7 @@ wrfuse(struct vnode *vp, struct uio *uiop, int ioflag,
 		mutex_exit(&p->p_lock);
 		return (EFBIG);
 	}
-	if (!vdata)
+	if (!GET_VDATA(vp))
 		return (EIO);
 	if ((err = fuse_getfilesize(vp, &fsize, credp))) {
 		DTRACE_PROBE3(wrfuse_err_filesize,
@@ -1657,7 +1702,7 @@ fuse_getattr(struct vnode *vp, struct vattr *vap, int flags, cred_t *credp,
 	fuse_msg_node_t *msgp = NULL;
 #ifndef DONT_CACHE_ATTRIBUTES
 	timestruc_t ts;
-	fuse_vnode_data_t *v_data = VTOFD(vp);
+	fuse_vnode_data_t *v_data = GET_VDATA(vp);
 #endif
 
 #ifndef DONT_CACHE_ATTRIBUTES
@@ -1733,7 +1778,7 @@ fuse_setattr(
 			return (err);
 	}
 	if (mask & AT_SIZE) {
-		if (vp->v_data)
+		if (GET_VDATA(vp))
 			fsize_change_notify(vp, 0, FSIZE_NOT_RELIABLE);
 			/*
 			 * Mark all pages beyond the truncation as invalid
@@ -2002,7 +2047,7 @@ fuse_access_i(void *vvp, int mode, struct cred *credp)
 	if (vp->v_type == VREG && mode == VEXEC) {
 		return (fuse_access_inkernelcheck(vp, mode, credp));
 	} else {
-		if (!vp->v_data)
+		if (!GET_VDATA(vp))
 			return (EIO);
 		msgp = fuse_setup_message(sizeof (*fai), FUSE_ACCESS,
 		    VNODE_TO_NODEID(vp), credp, FUSE_GET_UNIQUE(sep));
@@ -2179,7 +2224,7 @@ static int fuse_lookup(struct vnode *dvp, char *nm, struct vnode **vpp,
 	 * if this is the root of our filesystem, we will check
 	 * for valid access permissions
 	 */
-	if (!VTOFD(dvp)) {
+	if (!GET_VDATA(dvp)) {
 		err = EIO; /* does not look like a fuse-type directory */
 		goto out;
 	}
@@ -3210,7 +3255,7 @@ fuse_rename(vnode_t *sdvp, char *oldname, vnode_t *tdvp, char *newname,
 	if (err)
 		return (err);
 
-	if (!svp || !svp->v_data) {
+	if (!svp || !GET_VDATA(svp)) {
 		cmn_err(CE_CONT,"Abnormal condition in fuse_rename"
 			" oldname %s newname %s\n",oldname,newname);
 		return (EIO);
@@ -3597,8 +3642,10 @@ void fuse_destroy_cache(fuse_session_t *sep)
 				item = (fuse_avl_cache_node_t*)
 						avl_first(&(sep->avl_cache_i));
 				mutex_exit(&sep->avl_mutx);
-			} else
+			} else {
 				failed = 1;
+				cmn_err(CE_WARN,"Could not locate fuse cached data\n");
+			}
 		} while (!failed && item);
 }
 
@@ -3863,6 +3910,10 @@ fuse_getfilesize(struct vnode *vp, u_offset_t *fsize, struct cred *credp)
 	struct vattr va;
 	fuse_msg_node_t *msgp;
 
+	if (!GET_VDATA(vp)) {
+		cmn_err(CE_CONT,"Abnormal condition in fuse_getfilesize\n");
+		return (EIO);
+	}
 	/* Provide, if the updated file size is available with us */
 	if (VTOFD(vp)->file_size_status & FSIZE_UPDATED) {
 		*fsize = VTOFD(vp)->fsize;
@@ -4117,7 +4168,7 @@ fuse_putpage(struct vnode *vp, offset_t off, size_t len, int flags,
 		err = pvn_vplist_dirty(vp, (u_offset_t)off, fuse_putapage,
 		    flags, credp);
 	} else {
-		if (!vp->v_data) {
+		if (!GET_VDATA(vp)) {
 			cmn_err(CE_CONT,"Abnormal condition in fuse_putpage"
 				" off 0x%lx len %ld flags 0x%x\n",
 				(long)off,(long)len,(int)flags);
@@ -4347,7 +4398,7 @@ fuse_inactive(struct vnode *vp, struct cred *credp, caller_context_t *ct)
 	 */
 	deleted = 0;
 
-	if (vp->v_data && (vp->v_type != VDIR)
+	if (GET_VDATA(vp) && (vp->v_type != VDIR)
 	    && !vp->v_rdcnt && !vp->v_wrcnt) {
 		fuse_avl_cache_node_t find, *closep;
 
@@ -4360,7 +4411,7 @@ fuse_inactive(struct vnode *vp, struct cred *credp, caller_context_t *ct)
 			deleted = 1;
 		}
 	}
-	if (!deleted && vp->v_data) {
+	if (!deleted && GET_VDATA(vp)) {
 		(void) iterate_filehandle(vp, fuse_release_fh, &fh_param, NULL);
 		mutex_enter(&vp->v_lock);
 		if (vp->v_count > 1) {
