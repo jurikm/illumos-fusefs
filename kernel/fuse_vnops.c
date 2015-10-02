@@ -65,7 +65,9 @@
 #include "fuse_queue.h"
 #include "fuse.h"
 
-#define CHECK_VDATA O /* Optionally check consistency of v_data */
+#ifndef CHECK_VDATA 
+#define CHECK_VDATA 0 /* Optionally check consistency of v_data */
+#endif
 
 /* Vnode operations */
 static int fuse_open(struct vnode **vpp, int flag, struct cred *cred,
@@ -357,6 +359,7 @@ checkentry(struct fuse_entry_out *feo, enum vtype vtyp)
 	return (0);
 }
 
+#if CHECK_VDATA
 /*
  *	Check availability and consistency of v_data
  *	(meant for debugging)
@@ -394,11 +397,10 @@ static fuse_vnode_data_t *check_vdata(struct vnode *vp, int line)
 	return (v_data);
 }
 
-#if CHECK_VDATA
 #define GET_VDATA(vp) check_vdata((vp), __LINE__)
-#else
+#else /* CHECK_VDATA */
 #define GET_VDATA(vp) ((vp)->v_data)
-#endif
+#endif /* CHECK_VDATA */
 
 static void
 release_create_data(struct fuse_create_data *fcd)
