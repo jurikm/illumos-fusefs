@@ -1015,6 +1015,17 @@ static int fuse_close(struct vnode *vp, int flags, int count,
 		kmem_free(fhp, sizeof (*fhp));
 	}
 	/*
+	 *	If we are ending the last write, invalide the cached data
+	 *	so that the next read will be fetched from user space,
+	 *	thus updating the access time stamp.
+	 *	Do not interfere with a cache with concurrent writes.
+	 *	The cached attributes are still valid until next read.
+	 */
+	if ((vp->v_type != VDIR) && (vp->v_wrcnt == 1)
+	   && vn_has_cached_data(vp)) {
+		pvn_vplist_dirty(vp, 0, fuse_putapage, B_INVAL, credp);
+	}
+	/*
 	 * If the file is not open any more (is this the same as getting
 	 * a ref count of 0 above ?), check whether deleting the file
 	 * has been requested while it was open.
@@ -1143,6 +1154,13 @@ again:
 			    struct fuse_out_header *, msgp->opdata.fouth);
 			goto cleanup;
 		}
+
+		/*
+		 *	After a successful read, the access time may
+		 *	have been modified, so invalidate the cached
+		 *	attributes.
+		 */
+		invalidate_cached_attrs(vp);
 
 		/*
 		 * XXX: Is this required as this might have already been
