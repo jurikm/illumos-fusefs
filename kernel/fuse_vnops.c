@@ -612,7 +612,7 @@ fuse_std_filecheck(struct fuse_file_handle *fhp, struct fuse_fh_param *param)
 		 * for shell scripts or files being executed).
 		 */
 	if ((param->rw_mode & fhp->mode
-			 & (FREAD | FWRITE | FAPPEND | FCREAT)) &&
+			 & (FREAD | FWRITE | FAPPEND | FCREAT | FSEARCH)) &&
 	    crgetuid(param->credp) == crgetuid(fhp->credp) &&
 	    crgetgid(param->credp) == crgetgid(fhp->credp) &&
 	    (param->nodeid == fhp->nodeid)) {
@@ -980,9 +980,14 @@ static int fuse_close(struct vnode *vp, int flags, int count,
 	/*
 	 * JPA Only check within the cache, if not referenced in the
 	 * cache, there is nothing to do.
-	 * This happens in obscure circumstances related to "rm -rf"
+	 * This happens in obscure circumstances related to "rm -rf".
+	 * After "mkdir -p", the created directory is checked with FSEARCH
+	 * (mode 0x222880), so FSEARCH is also needed to find and release
+	 * the directory.
 	 */
-	if ((err = get_filehandle(vp, flags, credp, &fhp,
+	if ((err = get_filehandle(vp,
+				(vp->v_type == VDIR ? flags | FSEARCH : flags),
+				credp, &fhp,
 				CACHE_LIST_CHECK | CACHE_CHECK_ONLY))) {
 		DTRACE_PROBE2(fuse_close_err_filehandle,
 		    char *, "get_filehandle failed",
