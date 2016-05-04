@@ -1636,9 +1636,12 @@ static void fuse_set_getattr(struct vnode *vp, struct vattr *vap,
 	/* return the file system ino, not the fuse internal nodeid */
 	vap->va_nodeid = attr->ino;
 #ifdef _LP64
-	/* Unpack attr->rdev, received as 32 bits */
-	vap->va_rdev = makedevice((attr->rdev >> 18) & 0x3ffff,
-			attr->rdev & 0x3fff);
+	/*
+	 * Unpack attr->rdev always received in a 32 bits field. Anyway,
+	 * we do not know whether the library is a 32-bit or a 64-bit one.
+	 */
+	vap->va_rdev = makedevice((attr->rdev >> 18) & 0x3fff,
+			attr->rdev & 0x3ffff);
 #else
 	vap->va_rdev = attr->rdev;
 #endif
