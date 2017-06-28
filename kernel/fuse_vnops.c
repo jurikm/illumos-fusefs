@@ -1373,8 +1373,14 @@ wrfuse(struct vnode *vp, struct uio *uiop, int ioflag,
 		proc_t *p = ttoproc(curthread);
 
 		mutex_enter(&p->p_lock);
+#ifdef RCA_UNSAFE
+			/* Solaris */
+		(void) rctl_action(RCHD_PROC_LGC_FSIZE, p, RCA_UNSAFE);
+#else
+			/* OpenIndiana */
 		(void) rctl_action(rctlproc_legacy[RLIMIT_FSIZE], p->p_rctls,
 		    p, RCA_UNSAFE_SIGINFO);
+#endif
 		mutex_exit(&p->p_lock);
 		return (EFBIG);
 	}
