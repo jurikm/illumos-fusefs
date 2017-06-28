@@ -1160,12 +1160,14 @@ again:
 			goto cleanup;
 		}
 
+#ifndef DONT_CACHE_ATTRIBUTES
 		/*
 		 *	After a successful read, the access time may
 		 *	have been modified, so invalidate the cached
 		 *	attributes.
 		 */
 		invalidate_cached_attrs(vp);
+#endif
 
 		/*
 		 * XXX: Is this required as this might have already been

@@ -180,8 +180,10 @@ fuse_create_vnode(vfs_t *vfsp, uint64_t nodeid, uint64_t parent_nid, int type,
 	vp->v_data = vdata;
 	vdata->nodeid = nodeid;
 	vdata->par_nid = parent_nid;
+#ifndef DONT_CACHE_ATTRIBUTES
 	vdata->uid = (uid_t)-1;
 	vdata->gid = (gid_t)-1;
+#endif
 
 	/* Create the list for storing file handles */
 	list_create(&vdata->fh_list, sizeof (fuse_file_handle_t),
