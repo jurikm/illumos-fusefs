@@ -4275,7 +4275,13 @@ fuse_map(vnode_t *vp, offset_t off, struct as *as, caddr_t *addrp,
 	 */
 
 	as_rangelock(as);
+#ifdef ADDR_VACALIGN
+		/* OpenIndiana */
 	error = choose_addr(as, addrp, len, off, ADDR_VACALIGN, flags);
+#else
+		/* Solaris */
+	error = choose_addr(as, addrp, len, off, flags);
+#endif
 	if (error != 0) {
 		as_rangeunlock(as);
 		goto out;
