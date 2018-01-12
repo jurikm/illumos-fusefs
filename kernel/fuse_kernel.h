@@ -46,7 +46,7 @@
 #include <linux/major.h>
 #endif
 
-#define FUSE_SOLARIS_VERSION "1.3.1"
+#define FUSE_SOLARIS_VERSION "1.3.2"
 
 /** Version number of this interface */
 #define FUSE_KERNEL_VERSION 7
