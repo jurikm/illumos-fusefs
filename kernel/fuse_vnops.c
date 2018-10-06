@@ -1582,7 +1582,7 @@ out:
 	if (start_resid != uiop->uio_resid) {
 		if (unsent_offset < 0)
 			err = VOP_PUTPAGE(vp, (offset_t)(start_off & PAGEMASK),
-			    (size_t)0, 0, credp, ct);
+			    (size_t)0, B_INVAL, credp, ct);
 		else {
 			VTOFD(vp)->offset = unsent_offset;
 			fsize_change_notify(vp, fsize,
