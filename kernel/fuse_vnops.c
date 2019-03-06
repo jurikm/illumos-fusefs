@@ -3342,6 +3342,7 @@ fuse_rename(vnode_t *sdvp, char *oldname, vnode_t *tdvp, char *newname,
 		if (err != ENOENT) {
 			goto errout;
 		} else {
+			tvp = (struct vnode*)NULL;
 			err = 0;
 		}
 	}
