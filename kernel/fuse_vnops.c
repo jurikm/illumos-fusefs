@@ -3155,13 +3155,11 @@ fuse_path_check(struct vnode *svp, struct vnode *tdvp, struct cred *credp)
 					err = 0;
 				else
 					err = EINVAL;
-				vp = NULL;
 				break;
 			} else if (err) {
 				DTRACE_PROBE3(fuse_path_check_err_getvnode,
 				    char *, "fuse_getvnode returned error",
 				    int, err, uint64_t, VTOFD(vp)->par_nid);
-				vp = NULL;
 				break;
 			}
 			/* Release our hold on the currently looked up dir */
