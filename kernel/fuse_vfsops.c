@@ -481,6 +481,9 @@ fuse_unmount(struct vfs *vfsp, int flag, struct cred *crp)
 		fuse_destroy_cache(fsep);
 		/* Mark the filesystem as unmounted */
 		fsep->mounted = 0;
+		if (vfsp->vfs_count != 2)
+			cmn_err(CE_WARN,"Bad fuse cache reference count %d\n",
+				(int)vfsp->vfs_count);
 
 		/*
 		 * Wake the fuselib reader so it can exit and clean
