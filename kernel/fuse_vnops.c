@@ -26,7 +26,7 @@
  * Copyright 2009 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  *
- * Portions Copyright 2012-2015 Jean-Pierre Andre
+ * Portions Copyright 2012-2019 Jean-Pierre Andre
  */
 /*
  * This file has been derived from OpenSolaris devfs and others in uts/common/fs
@@ -168,6 +168,7 @@ static void
 fuse_page_mapin(struct vnode *vp, struct buf **bp, struct page *pp, size_t len,
     int flag, struct fuse_iov *iovp);
 static inline void fuse_vnode_free(struct vnode *vp, fuse_session_t *sep);
+static void fuse_free_vdata(struct vnode *vp);
 
 const fs_operation_def_t fuse_vnodeops_template[] = {
 	VOPNAME_OPEN,		{ .vop_open = fuse_open },
@@ -679,8 +680,9 @@ get_filehandle(struct vnode *vp, int flag, struct cred *credp,
 			    char *, "create_filehandle request failed",
 			    int, err, struct vnode *, vp);
 			/* release the vnode, if creation failed */
-			VFS_RELE(vp->v_vfsp);
+			fuse_free_vdata(vp);
 			vp->v_data = NULL;
+			VFS_RELE(vp->v_vfsp);
 			vn_free(vp);
 			goto out;
 		} else if (msgp && msgp->opdata.outdata) {
