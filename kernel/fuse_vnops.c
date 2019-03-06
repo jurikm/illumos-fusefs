@@ -907,7 +907,7 @@ static int fuse_discard_name(struct vnode *vp, fuse_session_t *sep)
 	fuse_avl_cache_node_t find, *unnamep;
 
 	if ((vp->v_type != VREG)
-	    || (!vp->v_rdcnt && !vp->v_wrcnt)) {
+	    || !vn_is_opened(vp,V_RDORWR)) {
 		VN_RELE(vp);
 		fuse_vnode_free(vp, sep);
 	} else {
@@ -1030,8 +1030,10 @@ static int fuse_close(struct vnode *vp, int flags, int count,
 	 *	Do not interfere with a cache with concurrent writes.
 	 *	The cached attributes are still valid until next read.
 	 */
-	if ((vp->v_type != VDIR) && (vp->v_wrcnt == 1)
-	   && vn_has_cached_data(vp)) {
+	if ((vp->v_type == VREG)
+	    && (flags & FWRITE)
+	    && !vn_has_other_opens(vp,V_WRITE)
+	    && vn_has_cached_data(vp)) {
 		pvn_vplist_dirty(vp, 0, fuse_putapage, B_INVAL, credp);
 	}
 	/*
@@ -1041,7 +1043,14 @@ static int fuse_close(struct vnode *vp, int flags, int count,
 	 * If so, release the file so that it becomes inactive and
 	 * can be deleted.
 	 */
-	if ((vp->v_type != VDIR) && ((vp->v_rdcnt + vp->v_wrcnt) == 1)) {
+	if ((vp->v_type == VREG)
+	    && !vn_has_other_opens(vp,V_RDORWR)
+	    && ((flags & (FREAD + FWRITE)) == (FREAD + FWRITE)
+			/* both rd and wr */
+		? vn_is_opened(vp,V_RDANDWR)
+			/* either rd or wr, but not both */
+		: vn_is_opened(vp,V_RDORWR)
+		    && !vn_is_opened(vp,V_RDANDWR))) {
 		fuse_avl_cache_node_t find, *closep;
 
 		find.facn_nodeid = VNODE_TO_NODEID(vp);
@@ -1906,7 +1915,7 @@ fuse_setattr(
 		fh_param.rw_mode = FWRITE | FAPPEND | FCREAT;
 		fh_param.nodeid = VNODE_TO_NODEID(vp);
 		fh_param.fufh = NULL;
-		if (vp->v_wrcnt
+		if (vn_is_opened(vp,V_WRITE)
 		   && (iterate_filehandle(vp, fuse_std_filecheck, &fh_param,
 								&fhp))) {
 			fsai->fh = fhp->fh_id;
@@ -2109,7 +2118,7 @@ fuse_access_i(void *vvp, int mode, struct cred *credp)
 		 * when it is creating as read-only or permissions
 		 * changed since the file was opened.
 		 */
-		if ((mode & VWRITE) && vp->v_wrcnt) {
+		if ((mode & VWRITE) && vn_is_opened(vp,V_WRITE)) {
 			struct fuse_fh_param fh_param;
 			struct fuse_file_handle *fhp;
 
@@ -2117,7 +2126,7 @@ fuse_access_i(void *vvp, int mode, struct cred *credp)
 			fh_param.rw_mode = FWRITE | FAPPEND | FCREAT;
 			fh_param.nodeid = VNODE_TO_NODEID(vp);
 			fh_param.fufh = NULL;
-			if (vp->v_wrcnt
+			if (vn_is_opened(vp,V_WRITE)
 			   && (iterate_filehandle(vp, fuse_std_filecheck,
 						&fh_param, &fhp))) {
 				fhp->ref--;
@@ -4454,8 +4463,8 @@ fuse_inactive(struct vnode *vp, struct cred *credp, caller_context_t *ct)
 	 */
 	deleted = 0;
 
-	if (GET_VDATA(vp) && (vp->v_type != VDIR)
-	    && !vp->v_rdcnt && !vp->v_wrcnt) {
+	if (GET_VDATA(vp) && (vp->v_type == VREG)
+	    && !vn_is_opened(vp,V_RDORWR)) {
 		fuse_avl_cache_node_t find, *closep;
 
 		find.facn_nodeid = VNODE_TO_NODEID(vp);
