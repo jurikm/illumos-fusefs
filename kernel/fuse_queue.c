@@ -310,6 +310,8 @@ fuse_avl_cache_node_t *
 fuse_avl_cache_node_create(vnode_t *np, uint64_t nodeid, uint64_t par_nodeid,
     unsigned short namelen, char *name)
 {
+	if (!VTOFD(np))
+		cmn_err(CE_WARN,"Creating vnode with no v_data\n");
 	fuse_avl_cache_node_t *nod = kmem_zalloc(
 	    sizeof (fuse_avl_cache_node_t), KM_SLEEP);
 	nod->facn_vnode_p = np;
