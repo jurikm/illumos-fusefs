@@ -21,6 +21,8 @@
 /*
  * Copyright 2009 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
+ *
+ * Portions Copyright 2019 Jean-Pierre Andre
  */
 
 /*
@@ -337,6 +339,30 @@ fuse_str_to_dev(char *fdstr)
 	return (dev);
 }
 
+/*
+ *		Check whether no directory is open when unmounting
+ */
+
+static int fuse_check_busy(fuse_session_t *sep)
+{
+	fuse_avl_cache_node_t *item;
+	struct vnode *vp;
+	int busy;
+
+	busy = 0;
+	mutex_enter(&sep->avl_mutx);
+	item = (fuse_avl_cache_node_t*)avl_first(&(sep->avl_cache_i));
+	while (item && !busy) {
+		vp = item->facn_vnode_p;
+		if (vp && (vp->v_type == VDIR))
+			busy = vp->v_count > 1;
+		item = (fuse_avl_cache_node_t*)AVL_NEXT(&(sep->avl_cache_i),
+						item);
+	}
+	mutex_exit(&sep->avl_mutx);
+	return (busy);
+}
+
 static int
 fuse_mount(struct vfs *vfsp, struct vnode *mvp, struct mounta *uap,
     struct cred *cr)
@@ -412,12 +438,6 @@ fuse_unmount(struct vfs *vfsp, int flag, struct cred *crp)
 		return (EPERM);
 
 	/*
-	 * We do not currently support forced unmounts
-	 */
-	if (flag & MS_FORCE)
-		return (ENOTSUP);
-
-	/*
 	 * We should never have a reference count of less than 2: one for the
 	 * caller, one for the root vnode.
 	 */
@@ -427,8 +447,25 @@ fuse_unmount(struct vfs *vfsp, int flag, struct cred *crp)
 	 * Any active vnodes will result in a hold on the root vnode
 	 */
 	data = vfsp->vfs_data;
-	if (data->vfs_root_vnode->v_count != 1)
-		return (EBUSY);
+	if (data->vfs_root_vnode->v_count != 1) {
+		if (flag & MS_FORCE)
+			cmn_err(CE_NOTE, "Forced unmount while root"
+				" directory held count %d\n",
+				data->vfs_root_vnode->v_count);
+		else
+			return (EBUSY);
+	}
+	/*
+	 * The file system must not hold the cwd of any process
+	 */
+	fsep = fuse_minor_get_session(getminor(vfsp->vfs_dev));
+	if (fsep && fuse_check_busy(fsep)) {
+		if (flag & MS_FORCE)
+			cmn_err(CE_NOTE, "Forced unmount while file"
+					" system was busy\n");
+		else
+			return (EBUSY);
+	}
 
 	/*
 	 * Release the last hold on the root vnode
