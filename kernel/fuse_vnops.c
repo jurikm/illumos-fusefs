@@ -2489,6 +2489,9 @@ fuse_lookup_i(struct vnode *dvp, char *nm, struct vnode **vpp, cred_t *credp)
 						*vpp = svp;
 				}
 				return (err);
+			} else {
+				/* Cache is obsolete, give back our hold */
+				VN_RELE(*vpp);
 			}
 		}
 	}
