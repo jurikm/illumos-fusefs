@@ -513,6 +513,8 @@ resp_intrprt:
 			DTRACE_PROBE2(create_filehandle_err_collision,
 			    char *, "Node already in cache",
 			    struct fuse_entry_out *, feo);
+			cmn_err(CE_WARN, "Vnode collision on id %lld\n",
+				(long long)tofind.facn_nodeid);
 			/*
 			 * We have the unhappy situation of forcing a purge
 			 * on the existing vnode.
@@ -2345,8 +2347,13 @@ fuse_free_vdata(struct vnode *vp)
 }
 
 /*
- * This routine frees a vnode and ensures that appropriate cleanups is taken
- * care of before returning it to the kernel
+ * This routine frees a vnode and ensures that appropriate cleanups are taken
+ * care of before returning it to the kernel.
+ * JPA This is called when the file system reuses a nodeid already known
+ * in cache, and the old entry has to be discarded.
+ * This probably means an inconsistency, and we should probably do the
+ * cleanup locally without reporting to user space, which may have a
+ * newer interpretation of the node id.
  */
 static void
 fuse_vnode_destroy(struct vnode *vp, struct cred *credp, fuse_session_t *sep)
@@ -2356,6 +2363,7 @@ fuse_vnode_destroy(struct vnode *vp, struct cred *credp, fuse_session_t *sep)
 	if (VTOFD(vp))
 		fuse_free_vdata(vp);
 	vp->v_data = NULL;
+	VFS_RELE(vp->v_vfsp);
 
 	vn_free(vp);
 }
@@ -2390,6 +2398,8 @@ fuse_getvnode(uint64_t nodeid, struct vnode **vpp, v_getmode vmode,
 			 */
 			mutex_exit(&sep->avl_mutx);
 			if (vmode == VNODE_NEW) {
+				cmn_err(CE_WARN, "Vnode collision on id %lld\n",
+					(long long)foundp->facn_nodeid);
 				fuse_vnode_destroy(*vpp, credp, sep);
 				create_new = 1;
 			} else {
