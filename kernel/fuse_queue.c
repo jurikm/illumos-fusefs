@@ -22,7 +22,7 @@
  * Copyright 2009 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  *
- * Portions Copyright 2015 Jean-Pierre Andre
+ * Portions Copyright 2015-2019 Jean-Pierre Andre
  */
 
 #include <sys/kmem.h>
@@ -316,8 +316,8 @@ fuse_avl_cache_node_create(vnode_t *np, uint64_t nodeid, uint64_t par_nodeid,
 	nod->facn_nodeid = nodeid;
 	nod->par_nodeid = par_nodeid;
 
+	nod->namelen = namelen;
 	if (namelen > 1) {
-		nod->namelen = namelen;
 		nod->name = kmem_alloc(namelen, KM_SLEEP);
 		(void) strlcpy(nod->name, name, namelen);
 	}
