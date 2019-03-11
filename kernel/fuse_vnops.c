@@ -1814,8 +1814,8 @@ fuse_setattr(
 	if (mask & AT_NOSET)
 		return (EINVAL);
 
-	if ((mask & (AT_SIZE | AT_MTIME | AT_ATIME))
-	    && (vap->va_size)) {
+	if ((mask & (AT_MTIME | AT_ATIME))
+	    || ((mask & AT_SIZE) && vap->va_size)) {
 			/*
 			 * Write unsent data before truncating, only
 			 * needed for data visible after the truncation.
