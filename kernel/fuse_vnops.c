@@ -1042,8 +1042,11 @@ static int fuse_close(struct vnode *vp, int flags, int count,
 	 * has been requested while it was open.
 	 * If so, release the file so that it becomes inactive and
 	 * can be deleted.
+	 * Note : concurrent closes may lead to races in the checks
 	 */
 	if ((vp->v_type == VREG)
+	    && !err
+	    && (count == 1)
 	    && !vn_has_other_opens(vp,V_RDORWR)
 	    && ((flags & (FREAD + FWRITE)) == (FREAD + FWRITE)
 			/* both rd and wr */
