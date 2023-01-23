@@ -340,7 +340,9 @@ fuse_str_to_dev(char *fdstr)
 }
 
 /*
- *		Check whether no directory is open when unmounting
+ *		Check whether no directory or file is open when unmounting
+ *
+ *	This may lead to races with concurrent openings
  */
 
 static int fuse_check_busy(fuse_session_t *sep)
@@ -354,8 +356,21 @@ static int fuse_check_busy(fuse_session_t *sep)
 	item = (fuse_avl_cache_node_t*)avl_first(&(sep->avl_cache_i));
 	while (item && !busy) {
 		vp = item->facn_vnode_p;
-		if (vp && (vp->v_type == VDIR))
-			busy = vp->v_count > 1;
+		if (vp) {
+			switch (vp->v_type) {
+			case VREG :
+				busy = vn_is_opened(vp, V_RDORWR);
+				break;
+			case VDIR :
+				busy = vp->v_count > 1;
+				break;
+			default :
+				break;
+			}
+		if (busy && vp->v_data)
+			cmn_err(CE_WARN, "Unmount rejected while node %ld"
+				" is open\n", (long)VNODE_TO_NODEID(vp));
+		}
 		item = (fuse_avl_cache_node_t*)AVL_NEXT(&(sep->avl_cache_i),
 						item);
 	}
@@ -456,7 +471,8 @@ fuse_unmount(struct vfs *vfsp, int flag, struct cred *crp)
 			return (EBUSY);
 	}
 	/*
-	 * The file system must not hold the cwd of any process
+	 * The file system must not hold the cwd of any process,
+	 * and no file must be open.
 	 */
 	fsep = fuse_minor_get_session(getminor(vfsp->vfs_dev));
 	if (fsep && fuse_check_busy(fsep)) {
