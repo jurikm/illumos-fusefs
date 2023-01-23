@@ -769,7 +769,7 @@ resp_intrprt:
 	crhold(credp);
 	fhp->credp = credp;
 	fhp->ref = 1;
-	fhp->process_id = curproc->p_pidp->pid_id;
+	fhp->process_id = ddi_get_pid();
 	fhp->nodeid = fvdatap->nodeid;
 
 	if (fufhpp)
