@@ -118,6 +118,8 @@ static int fuse_mknod(struct vnode *dvp, char *nm, struct vattr *vap,
     int flag, caller_context_t *ct, vsecattr_t *vsecp);
 static int fuse_space(vnode_t *vp, int cmd, struct flock64 *bfp, int flag,
     offset_t off, cred_t *cr, caller_context_t *ct);
+static int fuse_ioctl(vnode_t *vp, int com, intptr_t data, int flag,
+    cred_t *cred, int *rvalp, caller_context_t *ct);
 static int fuse_getpage(struct vnode *vp, offset_t off, size_t len,
     uint_t *protp, page_t *pl[], size_t plsz, struct seg *seg, caddr_t addr,
     enum seg_rw rw, struct cred *credp, caller_context_t *ct);
@@ -192,6 +194,7 @@ const fs_operation_def_t fuse_vnodeops_template[] = {
 	VOPNAME_SYMLINK,	{ .vop_symlink = fuse_symlink },
 	VOPNAME_READLINK,	{ .vop_readlink = fuse_readlink },
 	VOPNAME_SPACE,		{ .vop_space = fuse_space },
+	VOPNAME_IOCTL,		{ .vop_ioctl = fuse_ioctl },
 	VOPNAME_GETPAGE,	{ .vop_getpage = fuse_getpage },
 	VOPNAME_PUTPAGE,	{ .vop_putpage = fuse_putpage },
 	VOPNAME_SEEK,		{ .vop_seek = fuse_seek },
@@ -4086,6 +4089,62 @@ fuse_space(vnode_t *vp, int cmd, struct flock64 *bfp, int flag,
 	}
 
 	return (error);
+}
+
+/*
+ *	Minimal SEEK_DATA and SEEK_HOLE lseek(2) modes
+ */
+/* ARGSUSED */
+static int
+fuse_ioctl(vnode_t *vp, int com, intptr_t data, int flag, cred_t *credp,
+    int *rvalp, caller_context_t *ct)
+{
+#ifndef IOCTL_SEEK_DATA
+	enum { IOCTL_SEEK_DATA = _IO('f', 97), IOCTL_SEEK_HOLE = _IO('f', 98) };
+#endif /* IOCTL_SEEK_DATA */
+	offset_t off;
+	u_offset_t fsize;
+	int err;
+
+	err = 0;
+	switch (com) {
+	case IOCTL_SEEK_DATA : /* _IOWR('f', 97, off_t) */
+		/* Only have to check whether off is beyond end of file */
+		err = fuse_getfilesize(vp, &fsize, credp);
+		if (!err) {
+			if (ddi_copyin((void *)data, &off, sizeof (off), flag))
+				err = EFAULT;
+			else
+				if ((off < 0) || ((u_offset_t)off >= fsize))
+					err = ENXIO;
+		}
+		break;
+	case IOCTL_SEEK_HOLE : /* _IOWR('f', 98, off_t) */
+		/* Just set pointer to end of file */
+		err = fuse_getfilesize(vp, &fsize, credp);
+		if (!err) {
+			if (ddi_copyin((void *)data, &off, sizeof (off), flag))
+				err = EFAULT;
+			else {
+				if ((off < 0) || ((u_offset_t)off >= fsize))
+					err = ENXIO;
+				else
+					if (ddi_copyout(&fsize, (void *)data,
+							sizeof (off), flag))
+						err = EFAULT;
+			}
+		}
+		break;
+	default :
+		/* May get terminal-oriented ioctl's */
+		if (((com >> 8) == 'T') || ((com >> 8) == 't'))
+			err = ENOTTY;
+		else {
+			cmn_err(0, "Unknown fuse_ioctl 0x%x\n", com);
+			err = ENOSYS;
+		}
+	}
+	return (err);
 }
 
 /* ARGSUSED */
