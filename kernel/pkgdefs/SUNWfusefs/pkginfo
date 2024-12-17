@@ -25,7 +25,7 @@
 
 PKG="SUNWfusefs"
 NAME="FUSE kernel module"
-SUNW_PKGVERS="1.5"
+SUNW_PKGVERS="1.6"
 BASEDIR=/
 CATEGORY="system"
 CLASSES="none"
