@@ -169,7 +169,7 @@ fuse_fsync_fh(struct fuse_file_handle *fhp, struct fuse_fh_param *param);
 static void
 fuse_page_mapin(struct vnode *vp, struct buf **bp, struct page *pp, size_t len,
     int flag, struct fuse_iov *iovp);
-static inline void fuse_vnode_free(struct vnode *vp, fuse_session_t *sep);
+static void fuse_vnode_free(struct vnode *vp, fuse_session_t *sep);
 static void fuse_free_vdata(struct vnode *vp);
 
 const fs_operation_def_t fuse_vnodeops_template[] = {
@@ -3630,7 +3630,7 @@ cleanup:
  * This function does the release of all the associated
  * memory with the passed vnode
  */
-static inline void
+static void
 fuse_vnode_free(struct vnode *vp, fuse_session_t *sep)
 {
 	struct fuse_file_handle *fhp;
