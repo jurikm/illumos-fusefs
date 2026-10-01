@@ -545,6 +545,7 @@ fuse_statvfs(struct vfs *vfsp, struct statvfs64 *sp)
 	struct fuse_statfs_out *fso = NULL;
 	fuse_msg_node_t	*msgp = NULL;
 	fuse_session_t *sep = NULL;
+	vfssw_t *p_vfssw;
 
 	(void) bzero(sp, sizeof (*sp));
 
@@ -593,13 +594,16 @@ fuse_statvfs(struct vfs *vfsp, struct statvfs64 *sp)
 
 		sp->f_frsize = fso->st.frsize ? fso->st.frsize : fso->st.bsize;
 
+		p_vfssw = vfs_getvfsswbyvfsops(vfsp->vfs_op);
+		if (p_vfssw) {
+			(void) strlcpy(sp->f_basetype, p_vfssw->vsw_name,
+			    sizeof (sp->f_basetype));
 
-		(void) strlcpy(sp->f_basetype, vfssw[vfsp->vfs_fstype].vsw_name,
-		    sizeof (sp->f_basetype));
-
-		DTRACE_PROBE2(fuse_statvfs_info_statvfs,
-		    char *, "FUSE_STATFS reply",
-		    struct statvfs64 *, sp);
+			DTRACE_PROBE2(fuse_statvfs_info_statvfs,
+			    char *, "FUSE_STATFS reply",
+			    struct statvfs64 *, sp);
+		} else
+			err = EIO;
 	}
 	fuse_free_msg(msgp);
 	return (err);
