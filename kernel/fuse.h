@@ -148,8 +148,8 @@ typedef struct fuse_vnode_data {
  */
 #define	FUSE_BUF_ADJUST_SIZE(len)	(len)
 
-/* TBD: Should this be made atomic? */
-#define	FUSE_GET_UNIQUE(se_p)	(++se_p->unique)
+/* This has to be atomic */
+#define	FUSE_GET_UNIQUE(se_p)	(atomic_inc_64_nv(&se_p->unique))
 
 #define	DENTRY64_NAME_OFFSET	(offsetof(dirent64_t, d_name[0]))
 
