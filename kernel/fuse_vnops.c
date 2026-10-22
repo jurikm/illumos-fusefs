@@ -136,7 +136,7 @@ static int fuse_delmap(vnode_t *, offset_t, struct as *, caddr_t,  size_t,
 
 /* Other supporting routines */
 static int rdfuse(struct vnode *vp, struct uio *uiop, struct cred *credp);
-static int fuse_send_release(fuse_session_t *sep, struct fuse_file_handle *fh,
+static int fuse_send_release(fuse_session_t *sep, uint64_t fh_id,
     enum fuse_opcode op, struct vnode *vp, int flags);
 static void fuse_vnode_cache_remove(struct vnode *vp, fuse_session_t *sep);
 static void fuse_vnode_cleanup(struct vnode *vp, struct cred *credp,
@@ -588,14 +588,18 @@ fuse_release_fh(struct fuse_file_handle *fhp, struct fuse_fh_param *param)
 	}
 
 	if ((param->flag & FUSE_FORCE_FH_RELEASE) || fhp->ref == 0) {
+		uint64_t fh_id;
+
 		DTRACE_PROBE2(fuse_release_fh_info,
 		    char *, "file handle released.",
 		    struct fuse_file_handle *, fhp);
+		/* Always called with fvdatap->fh_list_lock held */
 		list_remove(&fvdatap->fh_list, fhp);
-		if (sep != NULL) {
-			(void) fuse_send_release(sep, fhp, op, vp, fhp->mode);
-		}
+		fh_id = fhp->fh_id;
 		kmem_free(fhp, sizeof (*fhp));
+		if (sep != NULL) {
+			(void) fuse_send_release(sep, fh_id, op, vp, fhp->mode);
+		}
 	}
 	/*
 	 * This function is always called from iterate_filehandle, and if
@@ -880,7 +884,7 @@ out:
 }
 
 static int
-fuse_send_release(fuse_session_t *sep, struct fuse_file_handle *fh,
+fuse_send_release(fuse_session_t *sep, uint64_t fh_id,
     enum fuse_opcode op, struct vnode *vp, int flags)
 {
 	struct fuse_release_in *fri;
@@ -892,7 +896,7 @@ fuse_send_release(fuse_session_t *sep, struct fuse_file_handle *fh,
 
 	/* Set up arguments to the fuse library */
 	fri = (struct fuse_release_in *)msgp->ipdata.indata;
-	fri->fh	= fh->fh_id;
+	fri->fh	= fh_id;
 	fri->flags = F_TO_O_FLAGS(flags & ~O_EXCL);
 
 	if ((err = fuse_queue_request_wait(sep, msgp))) {
@@ -982,6 +986,7 @@ static int fuse_close(struct vnode *vp, int flags, int count,
 	fuse_vnode_data_t *fvdatap = VTOFD(vp);
 	struct fuse_file_handle *fhp = NULL;
 	fuse_session_t *sep;
+	uint64_t fh_id;
 	int fh_mode;
 	int fh_processid;
 	enum fuse_opcode op = (vp->v_type == VDIR) ?
@@ -1059,8 +1064,9 @@ static int fuse_close(struct vnode *vp, int flags, int count,
 		list_remove(&fvdatap->fh_list, fhp);
 		mutex_exit(&fvdatap->fh_list_lock);
 
-		err = fuse_send_release(sep, fhp, op, vp, flags);
+		fh_id = fhp->fh_id;
 		kmem_free(fhp, sizeof (*fhp));
+		err = fuse_send_release(sep, fh_id, op, vp, flags);
 	}
 	/*
 	 *	If we are ending the last write, invalide the cached data
@@ -2392,7 +2398,14 @@ out:
 static void
 fuse_free_vdata(struct vnode *vp)
 {
+	struct fuse_file_handle *fhp;
 	fuse_vnode_data_t *fvdatap = VTOFD(vp);
+
+	if (!list_is_empty(&fvdatap->fh_list)) {
+		fhp = list_head(&fvdatap->fh_list);
+		cmn_err(CE_WARN, "Leaked file handle on inode %ld\n",
+				(long)fhp->nodeid);
+	}
 	list_destroy(&fvdatap->fh_list);
 	mutex_destroy(&fvdatap->fh_list_lock);
 	mutex_destroy(&fvdatap->f_lock);
