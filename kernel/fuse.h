@@ -74,8 +74,9 @@ typedef struct fuse_file_handle {
 	int		flags;
 	int		ref;
 	cred_t		*credp;
-	struct file 	*filep;
 	uint64_t	nodeid;
+	int		open_count;
+	int		new_open;
 } fuse_file_handle_t;
 
 struct fuse_fh_param {
@@ -83,6 +84,7 @@ struct fuse_fh_param {
 	cred_t *credp;
 	struct fuse_file_handle *fufh;
 	uint64_t nodeid;
+	pid_t process_id;
 	int rw_mode;
 	int flag;
 };

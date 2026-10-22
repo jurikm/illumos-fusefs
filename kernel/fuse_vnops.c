@@ -613,14 +613,24 @@ static int
 fuse_std_filecheck(struct fuse_file_handle *fhp, struct fuse_fh_param *param)
 {
 		/*
-		 * The process id is not relevant, because a file
-		 * descriptor may be inherited (this is common for
-		 * for shell scripts or files being executed).
+		 * The file handles have to be related to process ids
+		 * to handle concurrent accesses by different threads.
+		 * The handles are specific to an open mode, however
+		 * as FAPPEND implies an initial FREAD, a handle
+		 * created for FAPPEND is returned for FREAD.
+		 * When a mapping is created for some mode, the same
+		 * handle is returned for subsequent compatible opens,
+		 * even when requested by a different process.
+		 * As a consequence a new handle is created when a
+		 * descriptor is inherited (which is common for shell
+		 * scripts or files being executed).
 		 */
-	if ((param->rw_mode & fhp->mode
-			 & (FREAD | FWRITE | FAPPEND | FCREAT | FSEARCH)) &&
+	if (((param->rw_mode & fhp->mode
+			 & (FREAD | FWRITE | FAPPEND | FCREAT | FSEARCH)) ||
+		((param->rw_mode & FREAD) && (fhp->mode & FAPPEND))) &&
 	    crgetuid(param->credp) == crgetuid(fhp->credp) &&
 	    crgetgid(param->credp) == crgetgid(fhp->credp) &&
+	    ((param->process_id == fhp->process_id) || !fhp->process_id) &&
 	    (param->nodeid == fhp->nodeid)) {
 		fhp->ref++;
 		DTRACE_PROBE2(fuse_std_filecheck_info_found,
@@ -712,6 +722,7 @@ get_filehandle(struct vnode *vp, int flag, struct cred *credp,
 		fh_param.credp = credp;
 		fh_param.rw_mode = flag;
 		fh_param.nodeid = VNODE_TO_NODEID(vp);
+		fh_param.process_id = ddi_get_pid();
 		fh_param.fufh = NULL;
 		if (iterate_filehandle(vp, fuse_std_filecheck, &fh_param,
 		    fufhpp))
@@ -767,13 +778,14 @@ resp_intrprt:
 
 	fhp->fh_id = foout->fh;
 	fhp->flags = foout->open_flags;
-
 	fhp->mode = flag & ~(O_EXCL | O_NOCTTY | O_TRUNC);
 	crhold(credp);
 	fhp->credp = credp;
 	fhp->ref = 1;
 	fhp->process_id = ddi_get_pid();
 	fhp->nodeid = fvdatap->nodeid;
+	fhp->open_count = 1;
+	fhp->new_open = 0;
 
 	if (fufhpp)
 		*fufhpp = fhp;
@@ -844,7 +856,8 @@ static int fuse_open(struct vnode **vpp, int flag, struct cred *cred_p,
 		    struct vnode *, vp);
 		goto out;
 	}
-
+	if (fhp)
+		fhp->new_open = 1;
 	if ((flag & (FWRITE | FTRUNC | FAPPEND)) == (FWRITE | FTRUNC)) {
 		vattr_t va;
 		int err;
@@ -966,6 +979,8 @@ static int fuse_close(struct vnode *vp, int flags, int count,
 	fuse_vnode_data_t *fvdatap = VTOFD(vp);
 	struct fuse_file_handle *fhp = NULL;
 	fuse_session_t *sep;
+	int fh_mode;
+	int fh_processid;
 	enum fuse_opcode op = (vp->v_type == VDIR) ?
 	    FUSE_RELEASEDIR : FUSE_RELEASE;
 
@@ -1011,9 +1026,27 @@ static int fuse_close(struct vnode *vp, int flags, int count,
 		 * last close(), and we should only decrement by 1.
 		 * There are no known multiple close() for a directory,
 		 * though the count may be 2 (happens on a "rm -f")
+		 * Note : no concurrent close on the same handle has
+		 * been found, atomic decrement and test is not needed.
 		 */
-	fhp->ref -= ((count > 1) && (vp->v_type != VDIR) ? 1 : 2);
+	if (vp->v_type == VDIR)
+		fhp->ref -= 2;
+	else
+		if (!fhp->new_open)
+			fhp->ref--;
+		else
+			if (count > fhp->open_count) {
+				fhp->ref--;
+				fhp->open_count = count;
+			} else
+				fhp->ref -= 2;
+	fh_processid = fhp->process_id;
+	fh_mode = fhp->mode;
 	if (fhp->ref <= 0) {
+		if (fhp->ref < 0)
+			cmn_err(CE_WARN,
+				"Negative references to file handle %ld\n",
+				(long)fhp->nodeid);
 		/* Remove it from the list */
 		DTRACE_PROBE2(fuse_close_info_release,
 		    char *, "releasing file handle",
@@ -1040,18 +1073,17 @@ static int fuse_close(struct vnode *vp, int flags, int count,
 		pvn_vplist_dirty(vp, 0, fuse_putapage, B_INVAL, credp);
 	}
 	/*
-	 * If the file is not open any more (is this the same as getting
-	 * a ref count of 0 above ?), check whether deleting the file
+	 * If the file is not open any more , check whether deleting it
 	 * has been requested while it was open.
 	 * If so, release the file so that it becomes inactive and
 	 * can be deleted.
-	 * Note : concurrent closes may lead to races in the checks
+	 * Note : assuming vn_is_opened() is synchronized with close().
 	 */
 	if ((vp->v_type == VREG)
 	    && !err
 	    && (count == 1)
 	    && !vn_has_other_opens(vp,V_RDORWR)
-	    && ((flags & (FREAD + FWRITE)) == (FREAD + FWRITE)
+	    && ((fh_mode & (FREAD + FWRITE)) == (FREAD + FWRITE)
 			/* both rd and wr */
 		? vn_is_opened(vp,V_RDANDWR)
 			/* either rd or wr, but not both */
@@ -1920,6 +1952,7 @@ fuse_setattr(
 		fh_param.credp = credp;
 		fh_param.rw_mode = FWRITE | FAPPEND | FCREAT;
 		fh_param.nodeid = VNODE_TO_NODEID(vp);
+		fh_param.process_id = ddi_get_pid();
 		fh_param.fufh = NULL;
 		if (vn_is_opened(vp,V_WRITE)
 		   && (iterate_filehandle(vp, fuse_std_filecheck, &fh_param,
@@ -2131,6 +2164,7 @@ fuse_access_i(void *vvp, int mode, struct cred *credp)
 			fh_param.credp = credp;
 			fh_param.rw_mode = FWRITE | FAPPEND | FCREAT;
 			fh_param.nodeid = VNODE_TO_NODEID(vp);
+			fh_param.process_id = ddi_get_pid();
 			fh_param.fufh = NULL;
 			if (vn_is_opened(vp,V_WRITE)
 			   && (iterate_filehandle(vp, fuse_std_filecheck,
@@ -4423,6 +4457,22 @@ fuse_addmap(vnode_t *vp, offset_t off, struct as *as, caddr_t addr,
 		 */
 		err = get_filehandle(vp, FREAD | FWRITE, cr, &fhp,
 					CACHE_LIST_CHECK);
+		if (fhp) {
+			/* Mark as usable by any process */
+			fhp->process_id = 0;
+			if ((fhp->ref < 2) || !fhp->new_open) {
+				cmn_err(CE_WARN, "No existing open for"
+					" mapping nodeid %ld\n",
+					(long)fhp->nodeid);
+				err = EIO;
+			}
+		} else {
+			if (vp->v_data)
+				cmn_err(CE_WARN,
+					"Failed to addmap nodeid %ld\n",
+					(long)VNODE_TO_NODEID(vp));
+			err = EIO;
+		}
 	}
 
 	return (err);
