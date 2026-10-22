@@ -653,12 +653,15 @@ iterate_filehandle(struct vnode *vp, fuse_file_check_t file_check_fp,
 	struct fuse_file_handle *fh, *next_fh;
 	struct fuse_vnode_data *fvdatap = VTOFD(vp);
 
+	if (fufhpp)
+		*fufhpp = NULL;
 	mutex_enter(&fvdatap->fh_list_lock);
 	if (VNODE_TO_NODEID(vp) != FUSE_NULL_ID) {
 		for (fh = list_head(&fvdatap->fh_list); fh; fh = next_fh) {
 			next_fh = list_next(&fvdatap->fh_list, fh);
 			if ((ret = file_check_fp(fh, param))) {
-				*fufhpp = fh;
+				if (fufhpp)
+					*fufhpp = fh;
 				break;
 			}
 		}
@@ -2169,7 +2172,8 @@ fuse_access_i(void *vvp, int mode, struct cred *credp)
 			if (vn_is_opened(vp,V_WRITE)
 			   && (iterate_filehandle(vp, fuse_std_filecheck,
 						&fh_param, &fhp))) {
-				fhp->ref--;
+				if (fhp)
+					fhp->ref--;
 				fai->mask &= ~W_OK;
 			}
 		}
