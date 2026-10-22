@@ -47,12 +47,14 @@
 #include <sys/cmn_err.h>
 
 #include <sys/atomic.h>	/* used for debugging, added atomic counter */
+#include <sys/vfs_opreg.h>
 #include "fuse_kernel.h"
 
 extern struct modldrv fuse_dev_drv_modldrv;
 extern struct modlfs fuse_vfs_modldrv;
 extern void fuse_global_init();
 extern void fuse_global_fini();
+extern const fs_operation_def_t temp_vnodeops_template[];
 
 /*
  * Fuse kernel module has a char device as well as a filesystem.
@@ -71,10 +73,13 @@ _init(void)
 {
 	int rv;
 
-	cmn_err(CE_CONT,"!Fuse kernel %s interface %d.%d\n", FUSE_SOLARIS_VERSION,
+	cmn_err(CE_CONT,"!Fuse kernel %s interface %d.%d\n",
+		FUSE_SOLARIS_VERSION,
 		FUSE_KERNEL_VERSION, FUSE_KERNEL_MINOR_VERSION);
-	cmn_err(CE_CONT,"!Fuse kernel init at 0x%lx, vfs_modldrv at 0x%lx\n",
-		(long)_init,(long)&fuse_vfs_modldrv);
+	cmn_err(CE_CONT,"!Fuse kernel init at 0x%lx, vfs_modldrv at 0x%lx"
+		" temp_vnodeops_template at 0x%lx\n",
+		(long)_init, (long)&fuse_vfs_modldrv,
+		(long)temp_vnodeops_template);
 	fuse_global_init();
 	if ((rv = mod_install(&ml)) != 0) {
 		fuse_global_fini();
